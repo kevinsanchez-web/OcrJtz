@@ -1,0 +1,11 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+pydantic==2.14.0
+python-multipart==0.0.32
+pymupdf==1.28.2
+numpy==2.5.3
+pillow==12.3.0
+rapidocr-onnxruntime==1.4.4
+rapid-layout==1.2.1
+onnxruntime==1.30.0
+opencv-python==5.0.0.93

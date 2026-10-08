@@ -1,0 +1,15 @@
+{$DOMAIN} {
+	# HTTPS automático (Let's Encrypt) y redirección de HTTP a HTTPS
+	request_body {
+		max_size 21MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy api:8000 {
+		transport http {
+			response_header_timeout 180s
+		}
+	}
+}
