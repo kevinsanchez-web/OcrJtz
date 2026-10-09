@@ -6,6 +6,5 @@ pymupdf==1.28.2
 numpy==2.5.3
 pillow==12.3.0
 rapidocr-onnxruntime==1.4.4
-rapid-layout==1.2.1
 onnxruntime==1.30.0
 opencv-python==5.0.0.93
