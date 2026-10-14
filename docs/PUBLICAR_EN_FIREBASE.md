@@ -158,3 +158,13 @@ Revisados en `functions/src/index.ts`, `src/App.tsx`, `server.ts`, `firebase.jso
     aviso de privacidad con casilla de consentimiento antes de subir.
 11. Compartir el mapeo "resultado de la API → registros" entre `server.ts` y `functions/src/` (hoy están duplicados
     los módulos) para que ambos entornos se comporten igual.
+
+### Estado de los ajustes de la sección 10
+
+- Hechos (funcionamiento): 5 a 11. Archivos nuevos/cambiados en la app: `functions/src/jetson.ts` (lógica compartida),
+  `functions/src/index.ts` (rutas `analyze-jetson` + función 2.ª gen. `tramitesApiV2`), `server.ts`, `src/lib/jetsonClient.ts`,
+  `src/App.tsx`, `src/components/DocumentDropzone.tsx` (tope de 15 MB), `firebase.json` y `.env.example`.
+- Pendientes: 1 a 4 (privacidad). **No publicar la app abierta a cualquiera hasta resolverlos.**
+- Para desplegar: `firebase functions:secrets:set JETSON_API_KEY` (y `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`, con
+  `-` si no se usa Access), el parámetro `JETSON_API_URL` (se pide al desplegar o va en `functions/.env`) y `firebase deploy`.
+  La función anterior `tramitesApi` se conserva; bórrala cuando `tramitesApiV2` funcione.
