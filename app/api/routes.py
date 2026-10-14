@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from app import cache, history, jobs
 from app.config import ENABLE_PANEL, LLM_MODE, LLM_URL, LOG_FILENAMES, MAX_CONCURRENT_JOBS, MAX_UPLOAD_BYTES, TRANSIT_CLIENT, VLM_MODEL
 from app.schemas import AnalyzeDocumentResponse, JobStatus, OcrResponse
-from app.security import acquire_job, release_job, require_api_key
+from app.security import acquire_job, client_ip, release_job, require_api_key
 from app.services.analyzer import LEGACY_MESSAGE, AnalysisError, analyze_file, detect_kind
 from app.services.generic import ocr_file, pages_from_reads
 
@@ -71,7 +71,7 @@ def _run_job(request: Request, file: UploadFile, endpoint: str, work: Callable[[
     `es_transito`: la clave usada es la de la app de extracción de documentos de tránsito.
     Un archivo defectuoso nunca produce un 500: los errores atribuibles al archivo salen como 4xx."""
     rid = uuid.uuid4().hex[:6]
-    ip = request.client.host if request.client else "?"
+    ip = client_ip(request)
     client = getattr(request.state, "client", None) or TRANSIT_CLIENT
     is_transit = client == TRANSIT_CLIENT
     ext = os.path.splitext(file.filename or "")[1].lower() or "sin extensión"  # solo informativo: el tipo se detecta por contenido

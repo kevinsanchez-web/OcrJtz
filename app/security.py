@@ -63,9 +63,24 @@ def _hit(bucket: Dict[str, Deque[float]], ip: str, window: float, limit: int, re
         return True
 
 
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def client_ip(request: Request) -> str:
+    """IP real del cliente. Detrás de un túnel de Cloudflare (que se conecta desde la propia máquina) todas las
+    peticiones parecen venir de 127.0.0.1; entonces se usa `CF-Connecting-IP`. Ese encabezado SOLO se acepta si la
+    conexión directa es local: desde cualquier otro equipo se podría falsificar para esquivar el bloqueo."""
+    direct = request.client.host if request.client else "unknown"
+    if direct in _LOOPBACK:
+        real = request.headers.get("cf-connecting-ip", "").strip()
+        if real and len(real) <= 45:
+            return real
+    return direct
+
+
 def require_api_key(request: Request, key: Optional[str] = Security(api_key_header)) -> None:
     """Dependencia de FastAPI: exige una API key válida y aplica los límites por IP."""
-    ip = request.client.host if request.client else "unknown"
+    ip = client_ip(request)
     too_many = HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="Demasiadas solicitudes",

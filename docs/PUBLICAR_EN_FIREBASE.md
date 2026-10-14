@@ -233,3 +233,40 @@ los paquetes y el modelo latino de ~8 MB) y, para publicar, el permiso de TI y e
 Pendiente de validar: la imagen Docker nunca se ha construido en ARM64. En el primer `./deploy.sh` revisa que `pip install`
 termine sin errores (los paquetes usados tienen versiones para aarch64, pero no está comprobado en tu Jetson). El OCR corre en
 CPU; el VLM por Ollama sí usa la GPU.
+
+## 13. Puente temporal solo hacia la API (sin exponer la web)
+
+La app de tránsito **no** se publica por el túnel: solo la API. La app (donde corra: otro equipo, otro lugar o la función de Firebase)
+se conecta con dos campos de su `.env`:
+
+```
+JETSON_API_URL="https://xxxx.trycloudflare.com/api/v1/analyze-document"   # la dirección que muestra el túnel
+JETSON_API_KEY="<clave de la app>"                                         # la de API_KEYS (.env.local) que no lleva nombre
+```
+
+1. `Iniciar_tunel_api.bat` (deja la ventana abierta): activa los límites por minuto (30 subidas, 600 consultas), reinicia la API, abre un túnel
+   temporal de Cloudflare solo hacia el puerto 8000, muestra la dirección y la copia al portapapeles.
+2. Pon esa dirección en `JETSON_API_URL` de la app y reinicia la app (lee el `.env` al arrancar). La API sigue exigiendo la clave.
+3. `Detener_tunel_api.bat` cierra el túnel y devuelve la API a «sin límites por minuto».
+
+Notas:
+- La dirección cambia cada vez que se abre el túnel; si la app está en Firebase habría que redesplegar la función con la nueva
+  (para una dirección fija hace falta un túnel con nombre y dominio, sección 3).
+- Si la app corre en el mismo PC que la API, déjala con `http://127.0.0.1:8000`: este PC (red institucional) no resuelve `trycloudflare.com`.
+- **Rota la clave si se ha compartido**: una clave pegada en un chat o un repositorio ya no es secreta. La clave de tránsito se rotó el
+  2026-10-14 (la anterior dejó de funcionar); la nueva está en `.env.local` y en el `.env` de la app, y no debe pegarse en ningún sitio.
+- La IP real del visitante se toma de `CF-Connecting-IP` solo si la conexión llega desde el propio equipo (así el bloqueo por clave
+  incorrecta no afecta a todos).
+
+## 14. Acceso por usuarios: DESCARTADO
+
+Se probó una versión con inicio de sesión de Google, aprobación de usuarios por un administrador, cuotas y panel de administración,
+y se decidió **no hacerla**. La rama que la contenía se eliminó y `main` no tiene nada de eso.
+
+**Consecuencia: la app NO debe publicarse abierta a cualquiera.** Sin control de acceso, la función de Firebase devuelve todos los
+documentos a cualquier visitante (`GET /api/documents`, la base externa de prueba, borrados y ediciones sin dueño), tiene CORS
+abierto y permite usar el OCR sin límite. Mientras eso sea así, úsala solo en local (`npm run dev` o `npm run emulators`) o
+con la prueba temporal de la sección 13. Para publicarla habría que resolver el acceso de otra forma (por ejemplo, datos separados por
+navegador con Firebase Auth anónimo, quitar CORS y poner cuotas).
+
+Estado de los puntos de privacidad de la sección 10: 1 a 4 **pendientes** en `main`.

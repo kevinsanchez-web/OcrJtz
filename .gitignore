@@ -13,3 +13,4 @@ tests/last_report.json
 tests/baseline.json
 
 models_extra/
+tools/bin/
