@@ -2,6 +2,8 @@
 import io, os, sys, time, random
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # raiz del proyecto
 os.environ["API_KEYS"] = "k" * 40
+os.environ["CACHE_ENABLED"] = "0"
+os.environ["HISTORY_DB"] = os.path.join(os.environ.get("TEMP", "."), "test_history.db")
 import numpy as np, cv2
 from PIL import Image, ImageDraw, ImageFont
 from app.services.analyzer import analyze_image

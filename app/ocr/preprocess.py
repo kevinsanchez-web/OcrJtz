@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
+from app import imaging  # noqa: F401  (registra el formato HEIC de los iPhone)
+
 logger = logging.getLogger("document-api.ocr")
 
 

@@ -44,7 +44,9 @@ def parse_factura(text: str, ocr_score: float = 1.0, boxes: Optional[List[OcrBox
              or next((m for m in re.finditer(r'NIT\s*[:#]?\s*(\d{6,})', text, re.IGNORECASE)
                       if not m.group(1).startswith("890900608")), None))
     marca = re.search(r'MARCA(?:\s*Y\s*LINEA)?\s*[:#]?\s*([a-zA-Z0-9 -]+?)(?=\s+MODELO|\s+LINEA|\n|$)', text, re.IGNORECASE)
-    linea = re.search(r'(?<![A-Za-z])(?:REFERENCIA|LINEA)\s*[:#]?\s*([a-zA-Z0-9-]+)', text, re.IGNORECASE)
+    # REFERENCIA es la línea del vehículo; "MARCA Y LINEA: FAKE - MOTO" trae marca y línea juntas y es menos precisa
+    linea = (re.search(r'(?<![A-Za-z])REFERENCIA\s*[:#]?\s*([a-zA-Z0-9-]+)', text, re.IGNORECASE)
+             or re.search(r'(?<![A-Za-z])LINEA\s*[:#]?\s*([a-zA-Z0-9-]+)', text, re.IGNORECASE))
     modelo = re.search(r'MODELO\s*[:#]?\s*(\d{4})', text, re.IGNORECASE)
     motor = re.search(r'MOTOR\s*[:#]?\s*([A-Z0-9]+)', text, re.IGNORECASE)
     chasis = re.search(r'CHASIS\s*[:#]?\s*([A-Z0-9]+)', text, re.IGNORECASE)

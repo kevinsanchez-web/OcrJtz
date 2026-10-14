@@ -6,6 +6,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 os.environ["API_KEYS"] = "k" * 40
 os.environ["RATE_LIMIT_PER_MIN"] = "10000"
 os.environ["MAX_CONCURRENT_JOBS"] = "2"
+os.environ["CACHE_ENABLED"] = "0"  # la prueba de concurrencia envía el mismo archivo varias veces
+os.environ["HISTORY_DB"] = os.path.join(os.environ.get("TEMP", "."), "test_history.db")
 import numpy as np, pymupdf
 from PIL import Image
 from fastapi.testclient import TestClient

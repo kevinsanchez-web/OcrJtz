@@ -13,6 +13,8 @@ RUN pip install -r requirements.txt
 
 COPY main.py .
 COPY app ./app
+COPY tools ./tools
+RUN python tools/download_models.py
 
 # Usuario sin privilegios (los modelos OCR/layout ya vienen dentro de los paquetes pip)
 RUN useradd --system --uid 10001 appuser

@@ -21,28 +21,31 @@ _FALLBACKS = (
 )
 
 
-def candidates(base: np.ndarray) -> Iterator[Tuple[OcrResult, np.ndarray, np.ndarray]]:
-    """Genera (lectura, imagen enderezada, imagen leída: las cajas están en sus coordenadas) de la más barata a la más costosa (el consumidor decide cuándo parar)."""
-    oriented, probe, moved = orient(base)
+def candidates(base: np.ndarray) -> Iterator[Tuple[OcrResult, np.ndarray, np.ndarray, List[float]]]:
+    """Genera (lectura, imagen enderezada, imagen leída: las cajas están en sus coordenadas, giros aplicados) de la más barata a la más costosa (el consumidor decide cuándo parar)."""
+    oriented, probe, moved, rotations = orient(base)
     # Página derecha y bien leída: el sondeo ya es la lectura final (evita repetir un OCR completo)
     if not moved and is_good(probe):
-        yield probe, oriented, oriented
+        yield probe, oriented, oriented, rotations
     else:
-        yield run_ocr(oriented, cls=True), oriented, oriented
+        with_cls = run_ocr(oriented, cls=True)
+        # El clasificador de 180° a veces descarta líneas cortas que el sondeo sí leyó: se queda la mejor de las dos
+        yield (with_cls if quality(with_cls) >= quality(probe) else probe), oriented, oriented, rotations
     for improve, params in _FALLBACKS:
         improved = improve(oriented)
+        used = rotations
         res = run_ocr(improved, cls=True, params=params)
         if stats(res)[0] < 20:  # casi nada leído: la orientación pudo fallar por la borrosidad
-            improved, _, _ = orient(improve(base))
+            improved, _, _, used = orient(improve(base))
             res = run_ocr(improved, cls=True, params=params)
-        yield res, oriented, improved
+        yield res, oriented, improved, used
 
 
 def read_image(base: np.ndarray) -> OcrResult:
     """Mejor lectura por calidad de OCR (se detiene en cuanto una es buena)."""
     best_res: OcrResult = []
     best_q = -1.0
-    for res, _, _ in candidates(base):
+    for res, _, _, _ in candidates(base):
         q = quality(res)
         if q > best_q:
             best_res, best_q = res, q

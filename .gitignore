@@ -3,3 +3,13 @@ venv/
 __pycache__/
 .ruff_cache/
 .env.local
+
+logs/
+data/
+
+tests/samples/*
+!tests/samples/README.md
+tests/last_report.json
+tests/baseline.json
+
+models_extra/

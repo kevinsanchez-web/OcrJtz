@@ -41,7 +41,8 @@ FIELD_HINTS: Dict[str, Dict[str, str]] = {
         "vehiculoChasis": "número de chasis o VIN", "valorTotal": "valor total a pagar",
         "vehiculoCilindrada": "cilindraje en cc", "vehiculoColor": "color del vehículo"},
     "runt": {
-        "tramiteSolicitado": "trámite marcado con una X (matrícula, traspaso...)",
+        # tramiteSolicitado no se pide al modelo: es una casilla marcada y, si no hay marca, el modelo elige una
+        # opción de la lista impresa (probado: devolvió "matrícula" en un formulario sin ninguna casilla marcada)
         "propietarioNombre": "nombre completo del propietario",
         "propietarioIdentificacion": "cédula del propietario", "vehiculoMarca": "marca", "vehiculoLinea": "línea",
         "vehiculoMotor": "número de motor", "vehiculoChasis": "número de chasis", "vehiculoModelo": "año del modelo",

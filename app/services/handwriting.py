@@ -7,6 +7,7 @@ visión (VLM) se le pide también la transcripción de la franja, que acierta m�
 """
 import logging
 import re
+from collections import Counter
 from typing import List, Optional
 
 import cv2
@@ -17,7 +18,7 @@ from app.extraction.contact import (CONTACT_FIELDS, find_address, find_email, fi
 from app.llm import client
 from app.llm.refine import _encode_image
 from app.ocr.boxes import OcrBox, boxes_to_text, to_boxes
-from app.ocr.engine import OCR_SENSITIVE, run_ocr
+from app.ocr.engine import OCR_DEFAULT, OCR_SENSITIVE, run_ocr
 from app.schemas import DocumentItem
 
 logger = logging.getLogger("document-api.extraction")
@@ -55,7 +56,8 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
     """Completa en el sitio `celular`, `correo` y `direccion` de `item` si faltan. Nunca lanza excepciones."""
     data = item.extractedData
     wanted = [f for f in CONTACT_FIELDS if f in data and not data.get(f)]
-    if not wanted:
+    check_phone = "celular" in data and bool(data.get("celular"))  # un celular leído de la página se verifica en la franja
+    if not wanted and not check_phone:
         return
     try:
         anchors = _anchors(boxes)
@@ -68,8 +70,25 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
         big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         sub = to_boxes(run_ocr(big, cls=False, params=OCR_SENSITIVE))
         text = boxes_to_text(sub)
-        found = {"celular": find_phone(text, data.get("numeroDocumento")), "correo": find_email(text),
-                 "direccion": find_address(sub)}
+        exclude = data.get("numeroDocumento")
+        found = {"celular": find_phone(text, exclude), "correo": find_email(text), "direccion": find_address(sub)}
+        # Un dígito manuscrito mal leído invalida el celular: se lee la franja a varias escalas y gana la lectura más repetida
+        votes = Counter(v for v in [found["celular"]] if v)
+        for scale, params in ((1.5, OCR_SENSITIVE), (2.5, OCR_SENSITIVE), (1.0, OCR_DEFAULT), (2.0, OCR_DEFAULT)):
+            try:
+                resized = crop if scale == 1.0 else cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                extra = to_boxes(run_ocr(resized, cls=False, params=params))
+                v = find_phone(boxes_to_text(extra), exclude)
+                if v:
+                    votes[v] += 1
+            except Exception:
+                logger.exception("Falló una lectura adicional de la franja")
+        if votes:
+            found["celular"] = votes.most_common(1)[0][0]
+            if check_phone and found["celular"] != data.get("celular") and votes.most_common(1)[0][1] >= 2:
+                logger.info("Celular corregido con la lectura de la franja (%d de %d lecturas coinciden)",
+                            votes.most_common(1)[0][1], sum(votes.values()))
+                data["celular"] = found["celular"]
         # 2. Modelo de visión sobre la franja: transcribe mejor la letra manuscrita
         vlm = _ask_vlm(crop) if use_vlm and "correo" in wanted else {}
         if vlm.get("correo"):

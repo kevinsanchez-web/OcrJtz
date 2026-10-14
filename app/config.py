@@ -13,13 +13,15 @@ logging.basicConfig(
 # --- Depuración -------------------------------------------------------------------
 LOG_OCR_TEXT = os.getenv("LOG_OCR_TEXT", "0") == "1"    # SOLO depurar: imprime el texto leído (datos personales)
 LOG_FILENAMES = os.getenv("LOG_FILENAMES", "0") == "1"  # el nombre del archivo puede contener datos personales
+ENABLE_PANEL = os.getenv("ENABLE_PANEL", "1") != "0"   # página web /panel para probar documentos (pide la clave)
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "0") == "1"      # Swagger/ReDoc desactivados por defecto
 
 # --- Límites de uso ---------------------------------------------------------------
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "20")) * 1024 * 1024
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "20"))
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
-RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "30"))  # peticiones por IP
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "0"))  # subidas (POST) por minuto por app e IP; 0 = sin límite
+RATE_LIMIT_READS_PER_MIN = int(os.getenv("RATE_LIMIT_READS_PER_MIN", "0"))  # consultas (GET) por minuto; 0 = sin límite
 MAX_AUTH_FAILURES = int(os.getenv("MAX_AUTH_FAILURES", "10"))    # fallos de clave por IP cada 5 min
 PDF_RENDER_DPI = int(os.getenv("PDF_RENDER_DPI", "200"))  # 150 es más rápido pero cambia la lectura de formularios densos
 # --- Respaldo opcional con un modelo de lenguaje local (Ollama). Apagado si LLM_URL está vacío ------------
@@ -41,13 +43,27 @@ MIN_CONFIDENCE = 0.3       # por debajo de esto el documento se descarta
 ENOUGH_CONFIDENCE = 0.8    # con esta confianza no se prueban más mejoras de imagen
 EXCELLENT_OCR_SCORE = 0.92  # con una lectura así de buena, mejorar la imagen no ayuda: se deja de reintentar
 MAX_SECONDS_PER_IMAGE = int(os.getenv("MAX_SECONDS_PER_IMAGE", "60"))  # tope de reintentos por imagen/página
+# Caché en memoria: el mismo archivo con los mismos parámetros se responde al instante (nunca se guarda a disco)
+CACHE_ENABLED = os.getenv("CACHE_ENABLED", "1") != "0"
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))
+CACHE_MAX_ENTRIES = int(os.getenv("CACHE_MAX_ENTRIES", "32"))
 # Relectura ampliada de los datos dudosos (cédulas, fechas, chasis). En CPU suma ~7 s por página sin mejora
 # medible en las pruebas; actívala (REFOCUS=1) en la Jetson con GPU, donde es casi gratis.
 REFOCUS = os.getenv("REFOCUS", "0") == "1"
 
 # --- Seguridad (API servicio-a-servicio, fail-closed) -------------------------------
 # Claves válidas, separadas por comas (permite rotación sin downtime). Obligatorias.
-API_KEYS = [k.strip() for k in os.getenv("API_KEYS", os.getenv("API_KEY", "")).split(",") if k.strip()]
+# Cada entrada es "clave" o "nombre:clave". Una clave sin nombre es de la app de extracción de documentos de
+# tránsito (TRANSIT_CLIENT), así su configuración actual sigue funcionando; otras apps usan su propia clave
+# con nombre (ej. API_KEYS=<clave_transito>,contabilidad:<otra_clave>) y reciben el formato general.
+TRANSIT_CLIENT = os.getenv("TRANSIT_CLIENT", "transito").strip() or "transito"
+API_CLIENTS = []  # [(nombre, clave)]
+for _entry in os.getenv("API_KEYS", os.getenv("API_KEY", "")).split(","):
+    _entry = _entry.strip()
+    if _entry:
+        _name, _sep, _key = _entry.rpartition(":")
+        API_CLIENTS.append((_name.strip() if _sep and _name.strip() else TRANSIT_CLIENT, _key.strip()))
+API_KEYS = [k for _, k in API_CLIENTS]
 if not API_KEYS:
     raise RuntimeError("Define la variable de entorno API_KEYS (o API_KEY); la API no arranca sin autenticación.")
 if any(len(k) < 32 for k in API_KEYS):

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API de lectura OCR</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --panel:#020617; --fg:#e2e8f0; --muted:#94a3b8; --blue:#2563eb; --green:#22c55e; --red:#f87171; --amber:#fbbf24; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, Segoe UI, sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; } .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .card { background:var(--card); border-radius:12px; padding:14px; margin:12px 0; }
+  input[type=text], input[type=password] { background:var(--panel); border:1px solid #334155; color:var(--fg); border-radius:8px; padding:9px 11px; font:inherit; min-width:0; }
+  button { background:var(--blue); color:#fff; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.sec { background:#475569; } button:disabled { opacity:.5; cursor:default; }
+  .tabs { display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap; }
+  .tab { background:var(--card); color:var(--fg); padding:7px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-weight:600; font-size:14px; }
+  .tab.on { background:#334155; }
+  #drop { border:2px dashed #475569; border-radius:12px; padding:26px; text-align:center; color:var(--muted); cursor:pointer; }
+  #drop.over { border-color:var(--blue); background:#1e293b; color:var(--fg); }
+  .grid { display:grid; grid-template-columns:260px 1fr; gap:12px; }
+  @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+  #list { background:var(--panel); border-radius:10px; max-height:520px; overflow:auto; }
+  .item { padding:9px 12px; border-bottom:1px solid #1e293b; cursor:pointer; font-size:14px; word-break:break-all; }
+  .item.sel { background:#334155; } .ok { color:var(--green); } .bad { color:var(--red); } .wait { color:var(--amber); }
+  pre { background:var(--panel); border-radius:10px; padding:12px; margin:0; overflow:auto; max-height:520px; white-space:pre-wrap; word-break:break-word; font:12.5px/1.5 Consolas, monospace; }
+  canvas { max-width:100%; background:var(--panel); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid #334155; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; } .stat { background:var(--panel); border-radius:10px; padding:10px 12px; }
+  .stat b { display:block; font-size:22px; } .stat span { color:var(--muted); font-size:11px; }
+  label.opt { color:var(--muted); font-size:13px; display:flex; gap:6px; align-items:center; }
+  .hide { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>API de lectura OCR</h1>
+  <div class="muted">Sube imágenes o PDF desde cualquier dispositivo y mira lo que lee la API.</div>
+
+  <div class="card row">
+    <input id="key" type="password" placeholder="Clave de la app (X-API-Key)" style="flex:1; min-width:220px">
+    <button id="saveKey" class="sec">Guardar clave</button>
+    <button id="selftest" class="sec">Autoprueba</button>
+    <span id="conn" class="muted"></span>
+  </div>
+
+  <div class="tabs"><div class="tab on" data-t="up">Probar documentos</div><div class="tab" data-t="st">Estadísticas</div></div>
+
+  <div id="up">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <label class="opt"><input type="radio" name="mode" value="transit" checked> Documentos de tránsito</label>
+        <label class="opt"><input type="radio" name="mode" value="ocr"> OCR general (cualquier documento)</label>
+      </div>
+      <div id="ocrOpts" class="row hide" style="margin-bottom:10px">
+        <input id="fields" type="text" placeholder="Campos a pedir: total, fecha, correo" style="flex:1; min-width:220px">
+        <label class="opt"><input id="deep" type="checkbox"> usar modelo de visión (lento)</label>
+      </div>
+      <div id="drop">Arrastra aquí imágenes o PDF, o toca para elegirlos<input id="file" type="file" multiple accept="image/*,.pdf" class="hide"></div>
+      <div id="msg" class="muted" style="margin-top:8px"></div>
+    </div>
+    <div class="grid">
+      <div><div class="muted" style="margin:0 0 4px 2px">Archivos</div><div id="list"></div>
+        <div class="row" style="margin-top:8px"><button class="sec" id="exJson">JSON</button><button class="sec" id="exTxt">Texto</button><button class="sec" id="exCsv">CSV</button></div></div>
+      <div>
+        <div class="tabs"><div class="tab on" data-d="sum">Resumen</div><div class="tab" data-d="txt">Texto / campos</div><div class="tab" data-d="json">JSON</div><div class="tab" data-d="view">Vista con recuadros</div></div>
+        <pre id="d-sum">Elige un archivo o pulsa Autoprueba.</pre><pre id="d-txt" class="hide"></pre><pre id="d-json" class="hide"></pre>
+        <div id="d-view" class="hide"><canvas id="cv"></canvas><div id="hint" class="muted" style="margin-top:6px"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="st" class="hide card">
+    <div id="stErr" class="bad"></div>
+    <div class="cards" id="stCards"></div>
+    <p class="muted" id="stVlm"></p>
+    <table><thead><tr><th>Cuándo</th><th>App</th><th>Servicio</th><th>Tamaño</th><th>Tiempo</th><th>Estado</th><th>Detalle</th></tr></thead><tbody id="stRows"></tbody></table>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+let results = [], selected = -1;
+const keyEl = $('#key');
+try { keyEl.value = localStorage.getItem('ocr_key') || ''; } catch (e) {}
+$('#saveKey').onclick = () => { try { localStorage.setItem('ocr_key', keyEl.value.trim()); } catch (e) {} $('#msg').textContent = 'Clave guardada en este navegador.'; };
+const H = () => ({ 'X-API-Key': keyEl.value.trim() });
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// pestañas
+$$('.tabs > .tab[data-t]').forEach(t => t.onclick = () => { $$('.tabs > .tab[data-t]').forEach(x => x.classList.toggle('on', x === t)); $('#up').classList.toggle('hide', t.dataset.t !== 'up'); $('#st').classList.toggle('hide', t.dataset.t !== 'st'); if (t.dataset.t === 'st') loadStats(); });
+$$('.tab[data-d]').forEach(t => t.onclick = () => { $$('.tab[data-d]').forEach(x => x.classList.toggle('on', x === t)); ['sum','txt','json','view'].forEach(k => $('#d-' + k).classList.toggle('hide', k !== t.dataset.d)); if (t.dataset.d === 'view') draw(); });
+$$('input[name=mode]').forEach(r => r.onchange = () => $('#ocrOpts').classList.toggle('hide', mode() !== 'ocr'));
+const mode = () => $('input[name=mode]:checked').value;
+
+// subir
+const drop = $('#drop'), fileEl = $('#file');
+drop.onclick = () => fileEl.click();
+fileEl.onchange = () => { [...fileEl.files].forEach(upload); fileEl.value = ''; };
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => [...ev.dataTransfer.files].forEach(upload));
+
+async function upload(file, opts = {}) {
+  if (!keyEl.value.trim()) { $('#msg').textContent = 'Escribe la clave de la app primero.'; return; }
+  const m = opts.mode || mode();
+  let q = `mode=${m}&lines=true`;
+  const fields = m === 'ocr' && !opts.selftest ? $('#fields').value.split(',').map(s => s.trim()).filter(Boolean).join(',') : '';
+  if (fields) q += '&fields=' + encodeURIComponent(fields) + ($('#deep').checked ? '&deep=true' : '');
+  const item = { name: file.name, file, status: 'wait', note: 'enviando…', t0: Date.now(), selftest: !!opts.selftest };
+  results.push(item); selected = results.length - 1; renderList(); show();
+  try {
+    const fd = new FormData(); fd.append('file', file, file.name);
+    let r = await fetch('/api/v1/jobs?' + q, { method: 'POST', headers: H(), body: fd });
+    if (!r.ok) throw await err(r);
+    let j = await r.json();
+    while (j.status === 'queued' || j.status === 'processing') {
+      item.note = j.status === 'queued' ? 'en cola…' : (j.progress ? `página ${j.progress.page + 1} de ${j.progress.total}…` : 'leyendo…');
+      renderList(); if (results[selected] === item) $('#msg').textContent = `Procesando ${item.name}: ${item.note}`;
+      await new Promise(res => setTimeout(res, 1000));
+      r = await fetch('/api/v1/jobs/' + j.jobId, { headers: H() }); if (!r.ok) throw await err(r); j = await r.json();
+    }
+    item.secs = (Date.now() - item.t0) / 1000;
+    if (j.status === 'error') throw { status: j.error.status, detail: j.error.detail };
+    item.result = j.result; item.status = 'ok'; item.note = `${item.secs.toFixed(0)} s`;
+    if (item.selftest) { const t = (j.result.text || '').toUpperCase(); item.selftestOk = t.includes('PRUEBA') && t.includes('12345') && t.includes('98765'); item.status = item.selftestOk ? 'ok' : 'bad'; $('#msg').textContent = item.selftestOk ? `✔ La API funciona: leyó la imagen de prueba en ${item.secs.toFixed(1)} s.` : '✘ La API respondió pero no leyó bien el texto de prueba.'; }
+    else $('#msg').textContent = `✔ ${item.name}: listo en ${item.secs.toFixed(1)} s`;
+  } catch (e) {
+    item.status = 'bad'; item.error = e.detail || String(e); item.note = 'error';
+    $('#msg').textContent = `✘ ${item.name}: ${item.error}` + (e.status === 401 ? ' — revisa la clave' : '');
+  }
+  renderList(); if (results[selected] === item) show();
+}
+async function err(r) { let d = ''; try { d = (await r.json()).detail; } catch (e) {} return { status: r.status, detail: d || r.statusText }; }
+
+$('#selftest').onclick = () => {
+  const c = document.createElement('canvas'); c.width = 900; c.height = 260; const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, 900, 260); x.fillStyle = '#000'; x.font = '54px Arial';
+  x.fillText('PRUEBA OCR 12345', 40, 100); x.fillText('Factura No. 98765', 40, 200);
+  c.toBlob(b => { $('#ocrOpts'); upload(new File([b], 'autoprueba.png', { type: 'image/png' }), { mode: 'ocr', selftest: true }); }, 'image/png');
+};
+
+function renderList() {
+  $('#list').innerHTML = results.map((r, i) => `<div class="item ${i === selected ? 'sel' : ''}" data-i="${i}"><span class="${r.status}">${r.status === 'ok' ? '✔' : r.status === 'bad' ? '✘' : '⏳'}</span> ${esc(r.name)} <span class="muted">${esc(r.note || '')}</span></div>`).join('');
+  $$('#list .item').forEach(el => el.onclick = () => { selected = +el.dataset.i; renderList(); show(); });
+}
+
+function describe(r) {
+  if (r.status === 'wait') return ['Procesando…', ''];
+  if (r.status === 'bad' && !r.result) return ['✘ Error: ' + r.error, ''];
+  const j = r.result || {}; const L = [`✔ Funciona · ${r.secs.toFixed(1)} s`], T = [];
+  if (j.pages) { L.push(`${j.pages.length} página(s) · ${(j.text || '').length} caracteres leídos`);
+    j.pages.forEach(p => { L.push(`  p.${p.page} (${p.source}) confianza ${p.confidence.toFixed(2)}${p.documentType ? ' · tipo: ' + p.documentType : ''}`); (p.tables || []).forEach(t => L.push(`    tabla de ${t.rows.length} filas × ${Math.max(...t.rows.map(x => x.length))} columnas`)); });
+    T.push(j.text || ''); j.pages.forEach(p => (p.tables || []).forEach((t, n) => { T.push(`\n--- Tabla ${n + 1} (página ${p.page}) ---`); t.rows.forEach(row => T.push('  ' + row.join(' | '))); }));
+    if (j.fields) { T.push('\n--- Campos pedidos ---'); Object.entries(j.fields).forEach(([k, v]) => T.push(`  ${k}: ${v ? v.value : '(no encontrado)'}`)); } }
+  (j.documents || []).forEach(d => { L.push(`  Documento p.${d.page}: ${d.documentType} · confianza ${d.confidence.toFixed(2)}${d.needsReview ? '  ⚠ revisar' : ''}`);
+    T.push(`\n[p.${d.page}] ${d.documentType} (confianza ${d.confidence.toFixed(2)})`);
+    Object.entries(d.extractedData).forEach(([k, v]) => { if (v && typeof v === 'object' && !Array.isArray(v)) v = Object.entries(v).map(([a, b]) => `${a}: ${b || '-'}`).join(', '); T.push(`  ${k}: ${v === null || v === '' ? '-' : v}`); });
+    if (d.inheritedFields && d.inheritedFields.length) T.push(`  (completados desde otra página: ${d.inheritedFields.join(', ')})`); });
+  if (!j.documents?.length && !j.pages) L.push('No se reconoció ningún documento.');
+  (j.warnings || []).forEach(w => L.push('  ⚠ ' + w));
+  return [L.join('\n'), T.join('\n')];
+}
+function show() {
+  const r = results[selected]; if (!r) return;
+  const [s, t] = describe(r);
+  $('#d-sum').textContent = s + (r.selftest && r.result ? `\n\nVerificación: ${r.selftestOk ? 'CORRECTA' : 'FALLÓ'}` : '');
+  $('#d-txt').textContent = t || '(sin texto)'; $('#d-json').textContent = r.result ? JSON.stringify(r.result, null, 2) : (r.error || '');
+  draw();
+}
+
+// vista con recuadros (imágenes)
+let boxes = [];
+function rotateCanvas(src, deg) {            // giro antihorario `deg` ampliando el lienzo, igual que el servidor
+  const rad = (((deg % 360) + 360) % 360) * Math.PI / 180, w = src.width, h = src.height;
+  const nw = Math.round(Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad)));
+  const nh = Math.round(Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad)));
+  const c = document.createElement('canvas'); c.width = nw; c.height = nh;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, nw, nh);
+  g.translate(nw / 2, nh / 2); g.rotate(-rad); g.drawImage(src, -w / 2, -h / 2); return c;
+}
+function draw() {
+  const r = results[selected], cv = $('#cv'), x = cv.getContext('2d'); boxes = [];
+  x.clearRect(0, 0, cv.width, cv.height);
+  if (!r || !r.file || !r.file.type.startsWith('image/')) { cv.width = 10; cv.height = 10; $('#hint').textContent = r && r.file ? 'La vista con recuadros funciona con imágenes (los PDF se ven en Texto / campos).' : ''; return; }
+  const page0 = ((r.result || {}).pages || [])[0] || {}, lines = page0.lines;
+  const img = new Image(); img.onload = () => {
+    // la API enderezó la hoja antes de leerla (de lado, al revés): se aplican los mismos giros para que los recuadros coincidan
+    let src = img;
+    for (const deg of (page0.rotations || [])) src = rotateCanvas(src, deg);
+    const w = Math.min(src.width, 900), h = src.height * (w / src.width); cv.width = w; cv.height = h; x.drawImage(src, 0, 0, w, h);
+    (lines || []).forEach(l => { const [a, b, c, d] = [l.box[0]*w, l.box[1]*h, l.box[2]*w, l.box[3]*h]; const col = l.confidence >= .9 ? '#22c55e' : l.confidence >= .7 ? '#f59e0b' : '#ef4444';
+      x.strokeStyle = col; x.lineWidth = 2; x.strokeRect(a, b, c - a, d - b); x.fillStyle = col + '30'; x.fillRect(a, b, c - a, d - b); boxes.push([a, b, c, d, l]); });
+    $('#hint').textContent = lines ? 'Toca un recuadro para ver su texto.' : 'Usa «OCR general» para ver los recuadros.';
+  };
+  img.src = URL.createObjectURL(r.file);
+}
+$('#cv').onclick = e => { const cv = $('#cv'), k = cv.width / cv.getBoundingClientRect().width, px = (e.clientX - cv.getBoundingClientRect().left) * k, py = (e.clientY - cv.getBoundingClientRect().top) * k;
+  const b = boxes.find(([a, b, c, d]) => px >= a && px <= c && py >= b && py <= d); if (b) $('#hint').textContent = `${b[4].text}   (confianza ${b[4].confidence.toFixed(2)})`; };
+
+// exportar
+function save(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); }
+const cur = () => { const r = results[selected]; return r && r.result ? r : null; };
+$('#exJson').onclick = () => { const r = cur(); if (r) save(r.name + '_resultado.json', JSON.stringify(r.result, null, 2), 'application/json'); };
+$('#exTxt').onclick = () => { const r = cur(); if (r) save(r.name + '_resultado.txt', describe(r)[1], 'text/plain'); };
+$('#exCsv').onclick = () => { const r = cur(); if (!r) return; const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"'; const rows = [];
+  if (r.result.pages) { let any = false; r.result.pages.forEach(p => (p.tables || []).forEach((t, n) => { rows.push([`Tabla ${n + 1} (página ${p.page})`]); t.rows.forEach(x => rows.push(x)); rows.push([]); any = true; }));
+    if (!any) { rows.push(['página', 'texto', 'confianza']); r.result.pages.forEach(p => (p.lines || p.text.split('\n').map(t => ({ text: t, confidence: p.confidence }))).forEach(l => rows.push([p.page, l.text, l.confidence]))); }
+  } else { rows.push(['página', 'documento', 'campo', 'valor']); (r.result.documents || []).forEach(d => Object.entries(d.extractedData).forEach(([k, v]) => rows.push([d.page, d.documentType, k, v && typeof v === 'object' ? JSON.stringify(v) : v]))); }
+  save(r.name + '_resultado.csv', '﻿' + rows.map(x => x.map(q).join(';')).join('\r\n'), 'text/csv'); };
+
+// estadísticas
+async function loadStats() {
+  if ($('#st').classList.contains('hide')) return;
+  try { const r = await fetch('/api/v1/stats?recent=25', { headers: H() }); if (!r.ok) throw await err(r); const s = await r.json(); $('#stErr').textContent = '';
+    const dur = n => n >= 3600 ? `${Math.floor(n / 3600)} h ${Math.floor(n % 3600 / 60)} min` : `${Math.floor(n / 60)} min`;
+    $('#stCards').innerHTML = [['PETICIONES', s.total], ['ÚLTIMAS 24 H', s.last24h], ['ERRORES', s.errors], ['TIEMPO MEDIO', s.avgSeconds.toFixed(1) + ' s'], ['ENCENDIDA', dur(s.uptimeSeconds)]].map(([a, b]) => `<div class="stat"><b>${b}</b><span>${a}</span></div>`).join('');
+    $('#stVlm').textContent = s.vlm.enabled ? `Modelo de visión (VLM): encendido · ${s.vlm.model}` : 'Modelo de visión (VLM): apagado';
+    const ago = t => { const d = Math.floor(Date.now() / 1000 - t); return d < 90 ? `hace ${d} s` : d < 5400 ? `hace ${Math.floor(d / 60)} min` : `hace ${Math.floor(d / 3600)} h`; };
+    $('#stRows').innerHTML = s.recent.map(x => `<tr><td>${ago(x.ts)}</td><td>${esc(x.client)}</td><td>${esc(x.endpoint)}</td><td>${(x.bytes / 1024).toFixed(0)} KB</td><td>${x.seconds.toFixed(1)} s</td><td class="${x.status >= 400 ? 'bad' : ''}">${x.status}</td><td>${esc(x.error || '')}</td></tr>`).join('');
+  } catch (e) { $('#stErr').textContent = 'No se pudieron leer las estadísticas: ' + (e.detail || e); }
+}
+setInterval(loadStats, 3000);
+fetch('/health').then(r => r.ok ? ($('#conn').textContent = '● API encendida', $('#conn').style.color = '#22c55e') : 0).catch(() => $('#conn').textContent = '● sin conexión');
+</script>
+</body>
+</html>

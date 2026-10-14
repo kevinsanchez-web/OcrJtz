@@ -26,12 +26,13 @@ def parse_money(s: str) -> Optional[Union[int, float]]:
     return int(re.sub(r"\D", "", s))
 
 
-def finalize(items: List[DocumentItem]) -> None:
-    """Ajusta `extractedData` de cada documento a la forma que espera el frontend (en el sitio)."""
+def finalize(items: List[DocumentItem], nest_contact: bool = True) -> None:
+    """Ajusta `extractedData` de cada documento a la forma que espera el frontend (en el sitio).
+    `nest_contact`: anidar el contacto de la cédula en `contacto` (la forma de la app de tránsito)."""
     for item in items:
         data = item.extractedData
         for f in MONEY_FIELDS:
             if isinstance(data.get(f), str):
                 data[f] = parse_money(data[f])
-        if item.documentType == "cedula":
+        if nest_contact and item.documentType == "cedula":
             data["contacto"] = {f: data.pop(f, None) or "" for f in CONTACT_FIELDS}

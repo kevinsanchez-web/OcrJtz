@@ -92,3 +92,98 @@ Salud: `GET /health`. Respuestas: 200, 400, 401, 413, 422, 429, 503.
 
 ## Logs
 `docker compose logs -f api`
+
+## OCR general (cualquier documento)
+
+Además del endpoint de documentos de tránsito, `POST /api/v1/ocr` lee **cualquier** PDF o imagen
+(contratos, cartas, facturas de cualquier empresa, formularios, recibos...), sin asumir su contenido.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/ocr" -H "X-API-Key: TU_CLAVE" -F "file=@documento.pdf"
+```
+
+Respuesta: `text` (todo el texto), y por cada página en `pages`: `text`, `confidence`, `source`
+(`native` = texto digital del PDF, `ocr` = leído de la imagen), `lines` (cada línea con `box` = [x0,y0,x1,y1]
+relativo a la página, 0 a 1) y `keyValues` (pares "Etiqueta: valor" detectados). Si el documento es de un tipo
+conocido (cédula, factura, RUNT, gases, poder), además llegan sus campos estructurados en `documents`.
+
+Parámetros opcionales: `?lines=false` (respuesta más liviana, sin posiciones) y `?structured=false`
+(no buscar campos de tipos conocidos). Usa la misma lectura robusta (orientación, inclinación, borrosidad,
+límites de tiempo y de tamaño) y la misma autenticación que el resto.
+
+Límite conocido: el modelo de OCR actual no distingue bien los acentos ni la eñe ("Señor" → "Senor",
+"Año" → "Ano") ni algunos caracteres de otros idiomas; para cambiarlo haría falta otro modelo de reconocimiento.
+
+## Varias apps usando la misma API
+
+Cada app tiene **su propia clave**, y la clave dice qué app llama. En `API_KEYS` (separadas por comas):
+
+```
+API_KEYS=CLAVE_DE_TRANSITO,contabilidad:OTRA_CLAVE_DE_32_O_MAS_CARACTERES
+```
+
+- Una clave **sin nombre** es la de la app de extracción de documentos de tránsito (`TRANSIT_CLIENT`, por defecto
+  `transito`): su configuración actual no cambia.
+- Una clave `nombre:clave` es de otra app. Genera la clave con
+  `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
+- El registro muestra de qué app viene cada petición: `PETICION de la app 'contabilidad' ...`.
+- **La carga de otra app no interrumpe a tránsito:** el límite por minuto es por app, y las otras apps no pueden
+  ocupar todos los trabajos simultáneos (siempre queda un cupo libre para tránsito).
+- `POST /api/v1/analyze-document` conserva el formato de la app de tránsito. `POST /api/v1/ocr` (cualquier
+  documento) entrega a tránsito sus campos con la forma que su interfaz espera (`contacto` anidado) y a las demás
+  apps los campos planos.
+- Para quitar el acceso a una app basta con borrar su clave de `API_KEYS` y reiniciar.
+
+## Trabajos asíncronos (PDF largos y redes que cortan peticiones largas)
+
+```bash
+# 1. Subir: responde al instante con un jobId
+curl -X POST "http://127.0.0.1:8000/api/v1/jobs?mode=transit" -H "X-API-Key: TU_CLAVE" -F "file=@documento.pdf"
+# 2. Consultar hasta que status sea "done" (o "error"); mientras procesa trae progress {page,total}
+curl "http://127.0.0.1:8000/api/v1/jobs/JOB_ID" -H "X-API-Key: TU_CLAVE"
+```
+
+`mode=transit` devuelve lo mismo que `/api/v1/analyze-document`; `mode=ocr` lo mismo que `/api/v1/ocr`
+(con `&lines=true`, `&fields=...`, `&deep=true` opcionales). El resultado queda en memoria 30 minutos
+(`DELETE /api/v1/jobs/{id}` lo borra) y solo lo puede leer la app que lo creó. Un trabajo en cola nunca se rechaza
+con 503: espera su turno. Máximo 10 trabajos pendientes por app (429 si se excede).
+
+## Campos a pedido y tablas (OCR general)
+
+- `POST /api/v1/ocr?fields=numeroContrato,total,fecha,correo`: devuelve `fields` con el valor de cada campo pedido
+  (`value`, `source`, `page`) o `null` si no aparece. Busca entre los pares "etiqueta: valor" y las líneas del texto,
+  con sinónimos (total ~ valor total ~ monto) y tipos (fecha, correo, teléfono, importe). Con `&deep=true` los campos
+  que no estén en el texto se le piden al modelo de visión (~1 min por página, y solo se acepta un valor que también
+  aparezca en lo que leyó el OCR: nunca inventa).
+- Cada página trae `tables`: filas y columnas (`rows`) de las tablas detectadas.
+
+## Panel de escritorio y panel web
+
+- **Escritorio (Windows):** `panel_api.pyw` (acceso directo "Panel API OCR"). Enciende/apaga la API, prueba
+  documentos con avance en vivo y vista con recuadros, estadísticas, y creación/revocación de claves por app.
+- **Web:** `http://<servidor>:8000/panel` desde cualquier dispositivo que llegue a la API (arrastrar y soltar, vista
+  con recuadros, estadísticas). Pide la clave de la app y la guarda solo en ese navegador. `ENABLE_PANEL=0` la apaga.
+- `GET /api/v1/stats` (con clave): totales, tiempos, errores y últimas peticiones. El historial vive en
+  `data/history.db` y **solo guarda metadatos** (app, servicio, tamaño, tiempo, estado), nunca el contenido de los
+  archivos. En Docker monta `data/` como volumen si quieres conservarlo.
+- **Caché en memoria:** el mismo archivo con los mismos parámetros se responde al instante (`CACHE_ENABLED=0` la apaga;
+  `CACHE_TTL_SECONDS`, `CACHE_MAX_ENTRIES`). Nunca se escribe a disco.
+
+## Medir la precisión con tus documentos
+
+Copia documentos reales a `tests/samples/` con un `<nombre>.expected.json` por cada uno (formato en el encabezado de
+`tests/evaluate.py`) y ejecuta `python tests/evaluate.py`. Muestra qué campos acierta, compara con una referencia
+(`--save-baseline`) y avisa si un cambio empeora. `tests/samples/` no se sube a GitHub (datos personales).
+
+## Acentos y eñe (modelo de lectura latino)
+
+La API usa el modelo de reconocimiento latino PP-OCRv5 si existe `models_extra/latin_PP-OCRv5_rec_mobile_infer.onnx`
+(se descarga con `python tools/download_models.py`; el Dockerfile lo hace al construir). Lee "Señor Núñez", "Año",
+"¿Cómo estás?" y los espacios entre palabras, y mejoró el banco de pruebas de 200 a 205 de 209 campos. Sin el
+archivo la API sigue funcionando con el modelo por defecto (sin acentos). `OCR_REC_MODEL=` (vacío) lo desactiva.
+
+## Formatos aceptados
+
+PDF, imágenes (JPG, PNG, WEBP, TIFF, BMP, GIF y **HEIC/HEIF** de iPhone), y **Word (.docx) y Excel (.xlsx)**, cuyo texto
+y tablas se leen directamente sin OCR (cada hoja de Excel es una página). Los .doc y .xls antiguos responden 415:
+guárdalos como .docx/.xlsx o PDF.
