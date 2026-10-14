@@ -12,6 +12,10 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 6g
+    volumes:
+      - api_data:/app/data      # historial de uso (SQLite, sin contenido de archivos); el resto del contenedor es de solo lectura
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # para llegar a Ollama (VLM) instalado en la Jetson: LLM_URL=http://host.docker.internal:11434
 
   caddy:
     image: caddy:2
@@ -28,5 +32,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  api_data:
   caddy_data:
   caddy_config:

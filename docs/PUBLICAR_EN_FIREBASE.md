@@ -168,3 +168,68 @@ Revisados en `functions/src/index.ts`, `src/App.tsx`, `server.ts`, `firebase.jso
 - Para desplegar: `firebase functions:secrets:set JETSON_API_KEY` (y `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`, con
   `-` si no se usa Access), el parámetro `JETSON_API_URL` (se pide al desplegar o va en `functions/.env`) y `firebase deploy`.
   La función anterior `tramitesApi` se conserva; bórrala cuando `tramitesApiV2` funcione.
+
+## 11. Probar TODO antes de desplegar (emuladores de Firebase, sin tocar la nube)
+
+Los emuladores ejecutan la función real (`tramitesApiV2`), Hosting con su reescritura `/api/**` y Firestore en tu PC:
+nada se escribe en el proyecto de Firebase.
+
+1. API de la Jetson (o la de este PC) encendida en `http://127.0.0.1:8000`.
+2. En la app, crea (están ignorados por Git):
+   - `functions/.env.local` con `JETSON_API_URL=http://127.0.0.1:8000`
+   - `functions/.secret.local` con `JETSON_API_KEY=<la clave de la app>`, `CF_ACCESS_CLIENT_ID=-` y `CF_ACCESS_CLIENT_SECRET=-`
+     (`.env.local` y `.secret.local` solo los lee el emulador; el despliegue usa `functions/.env` y los secretos de Firebase).
+3. `npm run emulators` (compila la web y la función, y arranca todo). Abre `http://127.0.0.1:5000`, elige el motor
+   "Local (OCR)" y sube un documento: pasa por Hosting, la función, la API y Firestore, igual que en producción.
+4. Para ver qué hace la función: los registros salen en la ventana de los emuladores.
+
+Para probar contra una Jetson remota por el túnel, cambia `JETSON_API_URL` en `functions/.env.local` por
+`https://api.tudominio.com` (y las credenciales de Access en `.secret.local`).
+
+## 12. Qué hacer en la Jetson (paso a paso)
+
+Requisitos: JetPack con Docker y `docker compose`, acceso a internet para el primer arranque (baja la imagen base,
+los paquetes y el modelo latino de ~8 MB) y, para publicar, el permiso de TI y el dominio (secciones 2 y 3).
+
+1. **Descargar la API**
+   ```bash
+   git clone https://github.com/kevinsanchez-web/OcrJtz.git && cd OcrJtz
+   ```
+2. **Primer arranque**: `./deploy.sh`. Pregunta el dominio: **déjalo vacío** (el túnel no lo necesita). Crea `.env` con una
+   clave generada, construye la imagen y arranca. Al terminar muestra la clave y la dirección local.
+3. **Ajustar `.env`** (`nano .env`) y aplicar con `docker compose up -d api`:
+   ```
+   # clave principal (app de tránsito en local) + una clave NUEVA con nombre para la función de Firebase
+   API_KEYS=<la_que_generó_deploy>,firebase:<otra_clave_de_32_o_mas_caracteres>
+   ALLOWED_HOSTS=api.tudominio.com,127.0.0.1,localhost
+   ENABLE_PANEL=0
+   RATE_LIMIT_PER_MIN=30
+   RATE_LIMIT_READS_PER_MIN=600
+   ```
+   Genera la clave nueva con `python3 -c "import secrets;print(secrets.token_urlsafe(32))"`.
+4. **Probar en la propia Jetson**
+   ```bash
+   curl http://127.0.0.1:8000/health
+   curl -X POST http://127.0.0.1:8000/api/v1/ocr -H "X-API-Key: <clave>" -F "file=@documento.pdf"
+   docker compose logs -f api        # ver las peticiones en vivo
+   ```
+5. **Modelo de visión (opcional, recomendado en la Jetson por la GPU)**: instalar Ollama en la Jetson,
+   `ollama pull qwen2.5vl:7b`, y en `.env`:
+   ```
+   LLM_URL=http://host.docker.internal:11434
+   VLM_MODEL=qwen2.5vl:7b
+   LLM_TIMEOUT=300
+   ```
+   (`docker-compose.yml` ya permite que el contenedor llegue a Ollama.)
+6. **Túnel (solo si publicas)**: instalar `cloudflared` (paquete arm64) como servicio y apuntarlo a
+   `http://127.0.0.1:8000` (el puerto ya está publicado solo en loopback). **No hace falta Caddy**: arranca solo la API con
+   `docker compose up -d --build api` y deja cerrados los puertos 80 y 443 del firewall. Protege el túnel con Cloudflare Access
+   (sección 3).
+7. **Probar desde fuera** (emuladores de la sección 11 con `JETSON_API_URL=https://api.tudominio.com`) y después desplegar
+   la app en Firebase (sección 4).
+8. **Actualizar**: `git pull && docker compose up -d --build api`. **Apagar**: `docker compose stop api` (y `sudo systemctl stop
+   cloudflared` para cortar el acceso desde internet).
+
+Pendiente de validar: la imagen Docker nunca se ha construido en ARM64. En el primer `./deploy.sh` revisa que `pip install`
+termine sin errores (los paquetes usados tienen versiones para aarch64, pero no está comprobado en tu Jetson). El OCR corre en
+CPU; el VLM por Ollama sí usa la GPU.
