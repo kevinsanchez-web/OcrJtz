@@ -13,7 +13,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from app.config import VLM_MODEL
+from app.config import CONTACT_ENHANCE, VLM_MODEL
 from app.extraction.contact import (CONTACT_FIELDS, find_address, find_email, find_phone, v_address, v_email, v_phone)
 from app.llm import client
 from app.llm.refine import _encode_image
@@ -28,6 +28,40 @@ _SCHEMA = {"type": "object",
            "required": list(CONTACT_FIELDS)}
 _PROMPT = ("La imagen muestra líneas escritas a mano con datos de contacto: Celular, Correo y Dirección. "
            "Transcribe exactamente lo escrito en cada una. Si una línea no existe o no se lee, deja la cadena vacía.")
+
+
+_VIA = re.compile(r"\b(?:calle|cll?|cl|carrera|cra?|kr|kra|av|avenida|diag|dg|diagonal|tv|transversal)\b\W{0,2}\d", re.IGNORECASE)
+
+
+def _address_score(s: Optional[str]) -> int:
+    """Qué tan bien tiene forma de dirección colombiana (vía + número + «# 12-34»). Sirve para quedarse con la mejor
+    lectura entre el OCR del recorte y el VLM: el OCR a veces deja una dirección mutilada pero «con forma» y el VLM la
+    transcribe entera, y antes ganaba siempre el OCR."""
+    if not s:
+        return -1
+    score = 0
+    if re.search(r"#\s*\d+\s*[-–—]\s*\d+", s):
+        score += 3  # «# 1-147»: la forma completa de una nomenclatura
+    elif re.search(r"#\s*\d", s):
+        score += 1
+    if _VIA.search(s):
+        score += 2
+    if re.search(r"\bmadrid|bogot|cundinamarca|medell|cali\b|soacha|chia|zipaquir", s, re.IGNORECASE):
+        score += 1  # ciudad o departamento legibles
+    return score
+
+
+def _enhance(img: np.ndarray) -> np.ndarray:
+    """Recorte más legible: se estima y se quita el fondo (sombras, tinte del papel) y se sube el contraste local de la
+    tinta. Si algo falla, se devuelve el recorte tal cual."""
+    try:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        background = cv2.medianBlur(cv2.dilate(gray, np.ones((7, 7), np.uint8)), 21)
+        flat = cv2.divide(gray, background, scale=255)
+        flat = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(flat)
+        return cv2.cvtColor(flat, cv2.COLOR_GRAY2RGB)
+    except Exception:
+        return img
 
 
 def _anchors(boxes: List[OcrBox]) -> List[OcrBox]:
@@ -57,7 +91,8 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
     data = item.extractedData
     wanted = [f for f in CONTACT_FIELDS if f in data and not data.get(f)]
     check_phone = "celular" in data and bool(data.get("celular"))  # un celular leído de la página se verifica en la franja
-    if not wanted and not check_phone:
+    weak_address = bool(data.get("direccion")) and _address_score(data["direccion"]) < 4  # leída, pero sin forma de dirección completa
+    if not wanted and not check_phone and not weak_address:
         return
     try:
         anchors = _anchors(boxes)
@@ -66,8 +101,10 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
         crop = _band(img, anchors)
         if crop is None:
             return
+        prepared = _enhance(crop) if CONTACT_ENHANCE in ("ocr", "all") else crop  # para las lecturas del OCR
+        seen_by_vlm = prepared if CONTACT_ENHANCE == "all" else crop
         # 1. OCR del recorte ampliado
-        big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        big = cv2.resize(prepared, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         sub = to_boxes(run_ocr(big, cls=False, params=OCR_SENSITIVE))
         text = boxes_to_text(sub)
         exclude = data.get("numeroDocumento")
@@ -76,7 +113,7 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
         votes = Counter(v for v in [found["celular"]] if v)
         for scale, params in ((1.5, OCR_SENSITIVE), (2.5, OCR_SENSITIVE), (1.0, OCR_DEFAULT), (2.0, OCR_DEFAULT)):
             try:
-                resized = crop if scale == 1.0 else cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                resized = prepared if scale == 1.0 else cv2.resize(prepared, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
                 extra = to_boxes(run_ocr(resized, cls=False, params=params))
                 v = find_phone(boxes_to_text(extra), exclude)
                 if v:
@@ -90,11 +127,18 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
                             votes.most_common(1)[0][1], sum(votes.values()))
                 data["celular"] = found["celular"]
         # 2. Modelo de visión sobre la franja: transcribe mejor la letra manuscrita
-        vlm = _ask_vlm(crop) if use_vlm and "correo" in wanted else {}
+        vlm = _ask_vlm(seen_by_vlm) if use_vlm and ("correo" in wanted or "direccion" in wanted or weak_address) else {}
         if vlm.get("correo"):
             found["correo"] = vlm["correo"]  # el OCR acierta el dominio pero falla en el nombre de usuario
-        for f in ("celular", "direccion"):
-            found[f] = found[f] or vlm.get(f)
+        found["celular"] = found["celular"] or vlm.get("celular")
+        # Dirección: gana la lectura con mejor forma (antes, si el OCR leía algo, aunque estuviera mutilado, el VLM se descartaba)
+        candidates = [c for c in (data.get("direccion"), found.get("direccion"), vlm.get("direccion")) if c]
+        if candidates:
+            best = max(candidates, key=_address_score)
+            if best != data.get("direccion") and _address_score(best) > _address_score(data.get("direccion")):
+                logger.info("Dirección: se usa la lectura con mejor forma (%s)", "VLM" if best == vlm.get("direccion") else "OCR del recorte")
+                data["direccion"] = best
+            found["direccion"] = found.get("direccion") or best
         for f in wanted:
             if found.get(f):
                 data[f] = found[f]
@@ -106,7 +150,7 @@ def recover_contact(item: DocumentItem, boxes: List[OcrBox], img: np.ndarray, us
 def _ask_vlm(crop: np.ndarray) -> dict:
     if not client.enabled():
         return {}
-    out = client.chat_json(_PROMPT, _SCHEMA, model=VLM_MODEL, images=[_encode_image(crop)]) or {}
+    out = client.chat_json(_PROMPT, _SCHEMA, model=VLM_MODEL, images=[_encode_image(crop)], label="contacto manuscrito") or {}
     clean = {"celular": v_phone(str(out.get("celular", ""))), "correo": v_email(str(out.get("correo", ""))),
              "direccion": v_address(str(out.get("direccion", "")))}
     return {k: v for k, v in clean.items() if v}

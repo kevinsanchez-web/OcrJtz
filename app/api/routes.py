@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
-from app import cache, history, jobs
-from app.config import ENABLE_PANEL, LLM_MODE, LLM_URL, LOG_FILENAMES, MAX_CONCURRENT_JOBS, MAX_UPLOAD_BYTES, TRANSIT_CLIENT, VLM_MODEL
+from app import cache, history, jobs, live, received
+from app.config import ENABLE_PANEL, KEEP_RECEIVED, LLM_MODE, LLM_URL, LOG_FILENAMES, MAX_CONCURRENT_JOBS, MAX_UPLOAD_BYTES, TRANSIT_CLIENT, VLM_MODEL
 from app.schemas import AnalyzeDocumentResponse, JobStatus, OcrResponse
-from app.security import acquire_job, client_ip, release_job, require_api_key
+from app.security import acquire_job, client_ip, local_panel_only, release_job, require_api_key
 from app.services.analyzer import LEGACY_MESSAGE, AnalysisError, analyze_file, detect_kind
 from app.services.generic import ocr_file, pages_from_reads
 
@@ -46,6 +46,44 @@ def stats(request: Request, recent: int = Query(15, ge=0, le=200)):
     out = history.stats(None if client == TRANSIT_CLIENT else client, recent)
     out["vlm"] = {"enabled": bool(LLM_URL), "mode": LLM_MODE, "model": VLM_MODEL if LLM_MODE == "vision" else None}
     return out
+
+
+_LOCAL = [Depends(require_api_key), Depends(local_panel_only)]
+
+
+@router.get("/api/v1/live", include_in_schema=False, dependencies=_LOCAL)
+def live_list():
+    """Documentos en proceso y recién terminados, con sus etapas y el texto del VLM en vivo, para el panel de escritorio."""
+    return {"items": live.snapshot()}
+
+
+@router.get("/api/v1/received", include_in_schema=False, dependencies=_LOCAL)
+def received_list():
+    """Documentos recibidos recientes (metadatos), para el panel de escritorio. Requiere KEEP_RECEIVED=1."""
+    return {"items": received.listing()}
+
+
+@router.get("/api/v1/received/{rid}", include_in_schema=False, dependencies=_LOCAL)
+def received_detail(rid: str):
+    item = received.get(rid)
+    if not item:
+        raise HTTPException(status_code=404, detail="No encontrado o ya expiró")
+    res = item["result"]
+    return {"meta": received.meta(item), "result": res.model_dump() if res is not None else None, "error": item["error"]}
+
+
+@router.get("/api/v1/received/{rid}/file", include_in_schema=False, dependencies=_LOCAL)
+def received_file(rid: str):
+    item = received.get(rid)
+    if not item:
+        raise HTTPException(status_code=404, detail="No encontrado o ya expiró")
+    return Response(content=item["data"], media_type="application/octet-stream")
+
+
+@router.delete("/api/v1/received", status_code=204, include_in_schema=False, dependencies=_LOCAL)
+def received_clear():
+    received.clear()
+    live.clear()
 
 
 def parse_fields(raw: Optional[str]) -> Tuple[str, ...]:
@@ -93,6 +131,7 @@ def _run_job(request: Request, file: UploadFile, endpoint: str, work: Callable[[
         docs, pages = _count(hit)
         logger.info("[%s] RESULTADO desde caché (%.2fs)", rid, time.monotonic() - t0)
         history.record(rid, client, endpoint, len(contents), time.monotonic() - t0, 200, docs, pages, "desde caché")
+        received.add(rid, client, endpoint, file.filename, contents, result=hit, cached=True)
         return hit
 
     if not acquire_job(client):
@@ -104,6 +143,9 @@ def _run_job(request: Request, file: UploadFile, endpoint: str, work: Callable[[
             headers={"Retry-After": "5"},
         )
     logger.info("[%s] PROCESANDO...", rid)
+    live.begin(rid, client, endpoint, file.filename, len(contents))
+    live.attach(rid)
+    live.start(rid)
     try:
         result = work(contents, rid, is_transit)
         logger.info("[%s] TERMINADO en %.1fs -> %s", rid, time.monotonic() - t0, describe(result))
@@ -111,32 +153,48 @@ def _run_job(request: Request, file: UploadFile, endpoint: str, work: Callable[[
             logger.warning("[%s] AVISO: %s", rid, w)
         docs, pages = _count(result)
         history.record(rid, client, endpoint, len(contents), time.monotonic() - t0, 200, docs, pages)
+        received.add(rid, client, endpoint, file.filename, contents, result=result, seconds=time.monotonic() - t0)
+        live.end(rid, "done")
         cache.put(cache_key, result)
         return result
     except AnalysisError as e:
         logger.warning("[%s] ERROR %s: %s", rid, e.status_code, e.detail)
         history.record(rid, client, endpoint, len(contents), time.monotonic() - t0, e.status_code, error=e.detail)
+        received.add(rid, client, endpoint, file.filename, contents, error={"status": e.status_code, "detail": e.detail},
+                     seconds=time.monotonic() - t0)
+        live.end(rid, "error", e.detail)
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception:
         # No se registra el nombre del archivo: puede contener datos personales
         logger.exception("[%s] ERROR interno procesando documento", rid)
         history.record(rid, client, endpoint, len(contents), time.monotonic() - t0, 500, error="error interno")
+        received.add(rid, client, endpoint, file.filename, contents,
+                     error={"status": 500, "detail": "Error interno procesando el documento"}, seconds=time.monotonic() - t0)
+        live.end(rid, "error", "Error interno")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno procesando el documento",
         )
     finally:
+        live.detach()
         release_job(client)
 
 
 def _job_view(job: dict) -> JobStatus:
     result = job["result"]
     start = job["started"] or job["created"]
+    dump = result.model_dump() if result is not None else None
+    if dump is not None and not job.get("lines"):  # las posiciones solo se calcularon para el panel local; no se pidieron
+        if job["mode"] == "ocr":
+            for page in dump.get("pages") or []:
+                page["lines"] = None
+        else:
+            dump["pages"] = None
     return JobStatus(
         jobId=job["id"], status=job["status"], mode=job["mode"],
         progress={"page": job["done"], "total": job["total"]} if job["total"] else None,
         elapsedSeconds=round((job["finished"] or time.time()) - start, 1), cached=bool(job.get("cached")),
-        result=result.model_dump() if result is not None else None, error=job["error"])
+        result=dump, error=job["error"])
 
 
 @router.post("/api/v1/jobs", response_model=JobStatus, status_code=202, dependencies=[Depends(require_api_key)])
@@ -162,7 +220,7 @@ def create_job(
     if kind is None:
         raise HTTPException(status_code=400, detail="El archivo no es un PDF, una imagen ni un documento de Office válido.")
     try:
-        jid = jobs.submit(contents, client, mode, structured, lines, parse_fields(fields), deep)
+        jid = jobs.submit(contents, client, mode, structured, lines, parse_fields(fields), deep, file.filename or "")
     except jobs.TooManyJobs:
         raise HTTPException(status_code=429, detail="Demasiados trabajos pendientes; espera a que terminen algunos",
                             headers={"Retry-After": "30"})
@@ -200,16 +258,19 @@ def analyze_document(request: Request, file: UploadFile = File(...),
                      lines: bool = Query(False, description="Incluye `pages` con la posición de cada línea leída")):
     """Documentos de tránsito (cédula, factura, RUNT, gases, poder): devuelve sus campos estructurados."""
     # def síncrono: FastAPI lo ejecuta en un threadpool y el OCR no bloquea el event loop
+    want = lines or KEEP_RECEIVED  # el panel necesita las posiciones; al cliente se le quitan si no las pidió
+
     def work(contents: bytes, rid: str, is_transit: bool):
         reads: dict = {}
-        detected, warnings = analyze_file(contents, rid, reads if lines else None)  # formato de la app de tránsito, con cualquier clave
+        detected, warnings = analyze_file(contents, rid, reads if want else None)  # formato de la app de tránsito, con cualquier clave
         return AnalyzeDocumentResponse(documents=detected, warnings=warnings,
-                                       pages=pages_from_reads(reads, detected) if lines else None)
+                                       pages=pages_from_reads(reads, detected) if want else None)
 
-    return _run_job(request, file, "analyze-document", work,
-                    lambda r: ", ".join(f"{d.documentType} ({d.confidence:.2f})"
-                                        for d in r.documents) or "ningún documento reconocido",
-                    cache_parts=(lines,))
+    result = _run_job(request, file, "analyze-document", work,
+                      lambda r: ", ".join(f"{d.documentType} ({d.confidence:.2f})"
+                                          for d in r.documents) or "ningún documento reconocido",
+                      cache_parts=(want,))
+    return result if lines else result.model_copy(update={"pages": None})
 
 
 @router.post("/api/v1/ocr", response_model=OcrResponse, dependencies=[Depends(require_api_key)])

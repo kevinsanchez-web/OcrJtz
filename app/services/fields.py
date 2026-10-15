@@ -136,7 +136,8 @@ def find_fields(requested: List[str], pages: List[OcrPage], images: Dict[int, np
                       "\nCopia los valores tal como están escritos. Usa null si el dato no está o no se puede leer. "
                       "NO inventes ni completes datos.")
             try:
-                res = client.chat_json(prompt, schema, model=VLM_MODEL, images=[_encode_image(images[page_no])]) or {}
+                res = client.chat_json(prompt, schema, model=VLM_MODEL, images=[_encode_image(images[page_no])],
+                                       label="campos pedidos") or {}
             except Exception:
                 logger.exception("Falló la consulta al modelo de visión")
                 break

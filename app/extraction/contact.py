@@ -7,6 +7,7 @@ Lo que no cumple se deja vacío (ver `reconcile.py`, que además lo completa con
 import re
 from typing import Dict, List, Optional
 
+from app.extraction.geo import fix_address
 from app.extraction.lexicon import canonical
 from app.ocr.boxes import OcrBox
 
@@ -43,7 +44,7 @@ def v_address(s: str) -> Optional[str]:
     s = s.strip(" :=-.,")
     if len(s) < 6 or not re.search(r"\d", s):
         return None
-    return s if _STREET.search(s) or re.search(r"#\s*\w", s) else None
+    return fix_address(s) if _STREET.search(s) or re.search(r"#\s*\w", s) else None
 
 
 def find_phone(text: str, exclude: Optional[str] = None) -> Optional[str]:

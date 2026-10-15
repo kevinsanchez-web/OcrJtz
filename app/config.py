@@ -15,6 +15,11 @@ LOG_OCR_TEXT = os.getenv("LOG_OCR_TEXT", "0") == "1"    # SOLO depurar: imprime 
 LOG_FILENAMES = os.getenv("LOG_FILENAMES", "0") == "1"  # el nombre del archivo puede contener datos personales
 ENABLE_PANEL = os.getenv("ENABLE_PANEL", "1") != "0"   # página web /panel para probar documentos (pide la clave)
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "0") == "1"      # Swagger/ReDoc desactivados por defecto
+# Ver en el panel de escritorio los documentos que llegan (archivo + resultado, SOLO en memoria). Apagado por defecto.
+KEEP_RECEIVED = os.getenv("KEEP_RECEIVED", "0") == "1"
+RECEIVED_TTL = int(os.getenv("RECEIVED_TTL", "1800"))                      # segundos que se conserva cada uno
+RECEIVED_MAX_ITEMS = int(os.getenv("RECEIVED_MAX_ITEMS", "20"))
+RECEIVED_MAX_BYTES = int(os.getenv("RECEIVED_MAX_MB", "150")) * 1024 * 1024  # tope de memoria de todos juntos
 
 # --- Límites de uso ---------------------------------------------------------------
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "20")) * 1024 * 1024
@@ -32,6 +37,12 @@ LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:latest")        # modelo de solo tex
 VLM_MAX_SIDE = int(os.getenv("VLM_MAX_SIDE", "1024"))       # lado mayor de la imagen enviada al VLM (menos = más rápido)
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))          # segundos por llamada; si se agota se ignora el modelo
 MAX_SECONDS_PER_DOCUMENT = int(os.getenv("MAX_SECONDS_PER_DOCUMENT", "240"))  # tope por archivo: devuelve lo procesado
+# Si al archivo le quedan menos segundos que esto, no se consulta al VLM (una consulta en frío tarda ~60 s; con el modelo
+# cargado, ~10 s). Con un tope por archivo justo, las últimas páginas se quedaban sin VLM y el contacto manuscrito salía peor.
+VLM_MIN_SECONDS = int(os.getenv("VLM_MIN_SECONDS", "90"))
+# Preparación del recorte del contacto manuscrito (quitar sombras y subir el contraste): "off", "ocr" (solo las lecturas
+# del OCR) o "all" (también la imagen que ve el VLM).
+CONTACT_ENHANCE = os.getenv("CONTACT_ENHANCE", "ocr").strip().lower()
 MAX_RENDER_PIXELS = 3200  # lado mayor al convertir una página de PDF a imagen (evita agotar la memoria)
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 

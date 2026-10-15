@@ -9,7 +9,7 @@ from typing import Deque, Dict, Optional
 from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
-from app.config import (API_CLIENTS, MAX_AUTH_FAILURES, MAX_CONCURRENT_JOBS, RATE_LIMIT_PER_MIN,
+from app.config import (API_CLIENTS, KEEP_RECEIVED, MAX_AUTH_FAILURES, MAX_CONCURRENT_JOBS, RATE_LIMIT_PER_MIN,
                         RATE_LIMIT_READS_PER_MIN, TRANSIT_CLIENT)
 
 logger = logging.getLogger("document-api")
@@ -116,6 +116,21 @@ def require_api_key(request: Request, key: Optional[str] = Security(api_key_head
     if limit > 0 and not _hit(_requests_by_ip, bucket, 60, limit):  # 0 = sin límite por minuto
         logger.warning("Peticion LIMITADA (demasiadas por minuto) de %s desde %s", client, ip)
         raise too_many
+
+
+_PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "forwarded", "x-real-ip")
+
+
+def local_panel_only(request: Request) -> None:
+    """Para los endpoints que muestran documentos recibidos (datos personales): solo el panel de escritorio.
+    Exige la clave de tránsito, conexión directa desde esta máquina y NINGUNA cabecera de túnel o proxy, así que
+    por el túnel de Cloudflare (que las añade) nadie puede leerlos aunque tenga la clave."""
+    if not KEEP_RECEIVED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No encontrado")
+    direct = request.client.host if request.client else ""
+    if (getattr(request.state, "client", None) != TRANSIT_CLIENT or direct not in _LOOPBACK
+            or any(h in request.headers for h in _PROXY_HEADERS)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible desde el panel local")
 
 
 async def security_headers(request: Request, call_next):

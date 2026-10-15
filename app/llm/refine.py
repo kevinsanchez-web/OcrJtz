@@ -121,7 +121,8 @@ def refine_item(item: DocumentItem, text: str, ocr_score: float = 1.0,
         model, images = LLM_MODEL, None
 
     t0 = time.monotonic()
-    out = client.chat_json(prompt, schema, model=model, images=images)
+    out = client.chat_json(prompt, schema, model=model, images=images,
+                           label=f"{item.documentType}: {', '.join(missing)}")
     if not out:
         return item
 

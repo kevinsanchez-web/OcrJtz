@@ -11,9 +11,9 @@ from typing import List, Optional, Tuple
 import pymupdf  # PyMuPDF
 from PIL import Image
 
-from app import imaging, pagereads, progress  # noqa: F401  (imaging registra el formato HEIC)
+from app import imaging, live, pagereads, progress  # noqa: F401  (imaging registra el formato HEIC)
 from app.config import (ENOUGH_CONFIDENCE, EXCELLENT_OCR_SCORE, MAX_PDF_PAGES, MAX_RENDER_PIXELS,
-                        MAX_SECONDS_PER_DOCUMENT, MAX_SECONDS_PER_IMAGE, PDF_RENDER_DPI, REFOCUS)
+                        MAX_SECONDS_PER_DOCUMENT, MAX_SECONDS_PER_IMAGE, PDF_RENDER_DPI, REFOCUS, VLM_MIN_SECONDS)
 from app.extraction.marks import detect_tramite
 from app.extraction.pipeline import parse_page_text
 from app.llm.refine import refine_item
@@ -30,7 +30,6 @@ from app.services.reconcile import reconcile
 
 logger = logging.getLogger("document-api")
 
-VLM_MIN_SECONDS = 90  # si queda menos tiempo que esto, no se llama al modelo de visión (tarda ~60 s)
 
 
 class AnalysisError(Exception):
@@ -94,8 +93,11 @@ def analyze_image(img_bytes: bytes, deadline: Optional[float] = None) -> Optiona
     best_boxes, best_read, best_rots = [], None, []
     t0 = time.monotonic()
     empty_reads = 0
+    attempt = 0
+    live.note("OCR: leyendo la imagen")
     try:
         for res, oriented, read_img, rots in candidates(base):
+            attempt += 1
             boxes = to_boxes(res)
             text = boxes_to_text(boxes)
             if not text:
@@ -104,6 +106,8 @@ def analyze_image(img_bytes: bytes, deadline: Optional[float] = None) -> Optiona
                     break
                 continue
             item = parse_page_text(text, stats(res)[1], boxes)
+            live.note(f"OCR lectura {attempt}: " + (f"{item.documentType} (confianza {item.confidence:.2f})"
+                                                    if item else "sin tipo de documento reconocido"))
             key = (item.confidence if item else 0.0, quality(res))
             if key > best_key:
                 best_item, best_key = item, key
@@ -119,8 +123,10 @@ def analyze_image(img_bytes: bytes, deadline: Optional[float] = None) -> Optiona
     except Exception:
         logger.exception("Falló el análisis de la imagen")
     if REFOCUS and best_item and best_read is not None and (deadline is None or deadline - time.monotonic() > 30):
+        live.note("Relectura ampliada de los datos dudosos")
         best_item, best_text = _refocus_item(best_item, best_text, best_score, best_boxes, best_read)
     if best_item and best_read is not None:  # contacto manuscrito (celular, correo, dirección) de cédula/RUNT
+        live.note("Buscando el contacto manuscrito (celular, correo, dirección)")
         recover_contact(best_item, best_boxes, best_read,
                         use_vlm=deadline is None or deadline - time.monotonic() > VLM_MIN_SECONDS)
     if (best_item and best_item.documentType == "runt" and best_read is not None
@@ -235,6 +241,7 @@ def _analyze_pdf_page(page: "pymupdf.Page", n: int, total: int, rid: str,
     # 1. Texto nativo (PDFs digitales)
     raw_text = page.get_text()
     if raw_text and len(raw_text.strip()) > 30:
+        live.note(f"Página {n}: texto digital del PDF")
         item = parse_page_text(raw_text)
         item = refine_item(item, raw_text) if item else None
         if item:
@@ -244,6 +251,7 @@ def _analyze_pdf_page(page: "pymupdf.Page", n: int, total: int, rid: str,
             return item
 
     # 2. Fallback a OCR (páginas escaneadas)
+    live.note(f"Página {n}: OCR de la página escaneada")
     logger.info("[%s]   página %d/%d: ejecutando OCR...", rid, n, total)
     item = analyze_image(page.get_pixmap(dpi=_render_dpi(page)).tobytes("png"), deadline)
     logger.info("[%s]   página %d/%d: OCR -> %s", rid, n, total,
