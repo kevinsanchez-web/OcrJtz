@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from panel_ui.common import AMBER, BG, BLUE, FG, GREEN, MUTED, PANEL, RED, ROOT, SLATE, key_entries
+from panel_ui.common import Btn, DANGER, SURFACE  # noqa: E402,F401
 
 ENV_FILE = ROOT / ".env.local"
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{1,29}$")
@@ -42,29 +43,29 @@ class KeysTab(tk.Frame):
     def _build(self):
         tk.Label(self, text="Cada app que use la API tiene su propia clave. Así sabes quién llama, y puedes quitar el acceso "
                             "a una sin afectar a las demás.", bg=BG, fg=MUTED, anchor="w", justify="left",
-                 font=("Segoe UI", 9), wraplength=780).pack(fill="x", padx=12, pady=(12, 6))
+                 font=("Segoe UI", 10), wraplength=780).pack(fill="x", padx=12, pady=(12, 6))
         style = ttk.Style(self)
         style.configure("Keys.Treeview", background=PANEL, fieldbackground=PANEL, foreground=FG, rowheight=26, borderwidth=0)
-        style.configure("Keys.Treeview.Heading", background="#1e293b", foreground=FG, relief="flat")
+        style.configure("Keys.Treeview.Heading", background=SURFACE, foreground=FG, relief="flat")
         self.tree = ttk.Treeview(self, columns=("App", "Tipo", "Huella"), show="headings", height=8, style="Keys.Treeview")
         for c, w in (("App", 200), ("Tipo", 330), ("Huella", 120)):
-            self.tree.heading(c, text=c)
+            self.tree.heading(c, text=c, anchor="w")
             self.tree.column(c, width=w, anchor="w")
         self.tree.pack(fill="x", padx=10)
 
         bar = tk.Frame(self, bg=BG)
         bar.pack(fill="x", padx=10, pady=10)
         btn = dict(font=("Segoe UI", 10, "bold"), fg="white", bd=0, cursor="hand2", padx=14, pady=6)
-        tk.Button(bar, text="Nueva app…", bg=BLUE, activebackground=BLUE, command=self.create, **btn).pack(side="left")
-        tk.Button(bar, text="Copiar clave", bg=SLATE, activebackground=SLATE, command=self.copy, **btn).pack(side="left", padx=8)
-        tk.Button(bar, text="Revocar", bg="#dc2626", activebackground="#dc2626", command=self.revoke, **btn).pack(side="left")
+        Btn(bar, text="Nueva app…", bg=BLUE, activebackground=BLUE, command=self.create, **btn).pack(side="left")
+        Btn(bar, text="Copiar clave", bg=SLATE, activebackground=SLATE, command=self.copy, **btn).pack(side="left", padx=8)
+        Btn(bar, text="Revocar", bg=DANGER, activebackground=DANGER, command=self.revoke, **btn).pack(side="left")
         self.msg = tk.Label(self, text="", bg=BG, fg=MUTED, anchor="w", justify="left", font=("Segoe UI", 10), wraplength=780)
         self.msg.pack(fill="x", padx=12)
-        self.restart_btn = tk.Button(self, text="Reiniciar la API para aplicar los cambios", bg=PANEL, fg=AMBER, bd=0,
+        self.restart_btn = Btn(self, text="Reiniciar la API para aplicar los cambios", bg=PANEL, fg=AMBER, bd=0,
                                      cursor="hand2", font=("Segoe UI", 10, "bold"), command=self.restart)
         tk.Label(self, text="\nCómo usar una clave en otra app: enviarla en el encabezado  X-API-Key  de cada petición\n"
                             "(por ejemplo, POST http://127.0.0.1:8000/api/v1/ocr con el archivo en el campo «file»).",
-                 bg=BG, fg=MUTED, anchor="w", justify="left", font=("Segoe UI", 9)).pack(fill="x", padx=12)
+                 bg=BG, fg=MUTED, anchor="w", justify="left", font=("Segoe UI", 10)).pack(fill="x", padx=12)
 
     def reload(self):
         self.tree.delete(*self.tree.get_children())

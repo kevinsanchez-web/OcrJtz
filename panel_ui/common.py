@@ -1,6 +1,8 @@
 """Piezas compartidas por las pestañas del panel: colores, lectura de .env.local, llamadas a la API."""
 import io
 import json
+import tkinter as tk
+from tkinter import ttk
 import mimetypes
 import os
 import subprocess
@@ -16,8 +18,15 @@ PORT = 8000
 URL = f"http://127.0.0.1:{PORT}"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-BG, PANEL, FG, MUTED = "#0f172a", "#020617", "#e2e8f0", "#64748b"
-GREEN, RED, AMBER, BLUE, PURPLE, SLATE = "#22c55e", "#f87171", "#fbbf24", "#2563eb", "#7c3aed", "#475569"
+# Paleta: fondo azul noche, un solo acento (azul) y colores solo para estados (verde, ámbar, rojo)
+BG, SURFACE, PANEL, FG, MUTED = "#0d1424", "#141e33", "#0a101d", "#e6edf7", "#8b9bb4"
+BORDER = "#22304d"
+GREEN, RED, AMBER = "#4ade80", "#f87171", "#fbbf24"
+BLUE = "#4a7fe0"      # acento: la acción principal de cada pantalla
+SLATE = "#232f4a"     # botones neutros
+PURPLE = SLATE        # (antes morado) la autoprueba pasa a ser un botón neutro: un solo acento
+DANGER = "#8a3340"    # acciones destructivas, apagadas hasta que se pulsan
+FONT = "Segoe UI"
 
 MODES = {  # modalidad -> (ruta, descripción)
     "transito": ("/api/v1/analyze-document", "Documentos de tránsito (campos de la app)"),
@@ -83,6 +92,27 @@ def api_get(path: str, timeout: float = 5) -> dict:
         return _error(e, t0)
 
 
+def api_get_bytes(path: str, timeout: float = 30):
+    """GET autenticado que devuelve los bytes (un archivo), o None si falla."""
+    try:
+        req = urllib.request.Request(URL + path, headers={"X-API-Key": api_key()})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except Exception:
+        return None
+
+
+def api_delete(path: str, timeout: float = 10) -> dict:
+    """DELETE autenticado: {ok, status, secs, error?}."""
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(URL + path, method="DELETE", headers={"X-API-Key": api_key()})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return {"ok": True, "status": r.status, "secs": time.time() - t0}
+    except Exception as e:
+        return _error(e, t0)
+
+
 def post_file(path: str, name: str, data: bytes) -> dict:
     """Sube un archivo a la API (multipart): {ok, status, secs, json|error}."""
     boundary = uuid.uuid4().hex
@@ -138,7 +168,7 @@ def describe(res: dict) -> tuple:
         return f"✘ Error {res['status']}: {res['error']}", ""
     head = f"✔ Funciona · HTTP {res['status']} · {res['secs']:.1f} s"
     lines, readable = [head], []
-    if "pages" in j:  # OCR general
+    if j.get("pages") is not None:  # OCR general
         lines.append(f"{len(j['pages'])} página(s) · {len(j.get('text', ''))} caracteres leídos")
         for p in j["pages"]:
             tipo = f" · tipo: {p['documentType']}" if p.get("documentType") else ""
@@ -164,7 +194,7 @@ def describe(res: dict) -> tuple:
             readable.append(f"  {k}: {v if v not in (None, '', []) else '-'}")
         if d.get("inheritedFields"):
             readable.append(f"  (completados desde otra página: {', '.join(d['inheritedFields'])})")
-    if not j.get("documents") and "pages" not in j:
+    if not j.get("documents") and j.get("pages") is None:
         lines.append("No se reconoció ningún documento.")
     for w in j.get("warnings", []):
         lines.append(f"  ⚠ {w}")
@@ -192,3 +222,62 @@ def ago(ts: Optional[float]) -> str:
         return "nunca"
     s = int(time.time() - ts)
     return f"hace {s} s" if s < 90 else f"hace {s // 60} min" if s < 5400 else f"hace {s // 3600} h"
+
+
+
+def _shade(color: str, pct: float) -> str:
+    """Aclara (pct > 0) u oscurece (pct < 0) un color #rrggbb."""
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    f = (lambda v: int(v + (255 - v) * pct)) if pct > 0 else (lambda v: int(v * (1 + pct)))
+    return "#%02x%02x%02x" % tuple(max(0, min(255, f(v))) for v in (r, g, b))
+
+
+class Btn(tk.Button):
+    """Botón plano que se aclara al pasar el cursor. Para cambiar su color después usa `restyle` (no `config(bg=...)`)."""
+
+    def __init__(self, master, **kw):
+        kw.setdefault("relief", "flat")
+        kw.setdefault("bd", 0)
+        kw.setdefault("cursor", "hand2")
+        kw.setdefault("highlightthickness", 0)
+        kw.setdefault("font", (FONT, 10, "bold"))
+        kw.setdefault("disabledforeground", MUTED)
+        self._base = kw.get("bg", BG)
+        kw["activebackground"] = _shade(self._base, 0.12)
+        kw.setdefault("activeforeground", kw.get("fg", "white"))
+        super().__init__(master, **kw)
+        self.bind("<Enter>", lambda e: self._hover(True))
+        self.bind("<Leave>", lambda e: self._hover(False))
+
+    def _hover(self, on: bool) -> None:
+        if str(self["state"]) == "normal":
+            super().config(bg=_shade(self._base, 0.12) if on else self._base)
+
+    def restyle(self, bg=None, fg=None, **kw) -> None:
+        if bg:
+            self._base = bg
+        extra = {"fg": fg, "activeforeground": fg} if fg else {}
+        super().config(bg=self._base, activebackground=_shade(self._base, 0.12), **extra, **kw)
+
+
+def apply_theme(root) -> None:
+    """Estilo común de las piezas ttk: pestañas sin marco (la activa se ve por su color y peso) y barras de desplazamiento oscuras."""
+    st = ttk.Style(root)
+    st.theme_use("clam")
+    st.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 0, 0, 0), bordercolor=BG, lightcolor=BG, darkcolor=BG)
+    st.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(16, 9), borderwidth=0, bordercolor=BG,
+                 lightcolor=BG, darkcolor=BG, focuscolor=BG, font=(FONT, 10))
+    st.map("TNotebook.Tab", foreground=[("selected", FG), ("active", FG)], background=[("selected", BG), ("active", BG)],
+           font=[("selected", (FONT, 10, "bold"))], expand=[("selected", (0, 0, 0, 0))],
+           bordercolor=[("selected", BG), ("!selected", BG)], lightcolor=[("selected", BG), ("!selected", BG)],
+           darkcolor=[("selected", BG), ("!selected", BG)])  # clam pinta bordes claros por estado: se anulan todos
+    # Tablas: sin marco claro, encabezado discreto y fila seleccionada en el azul del acento
+    st.configure("Treeview", bordercolor=BG, lightcolor=BG, darkcolor=BG, borderwidth=0, relief="flat", font=(FONT, 10))
+    st.map("Treeview", background=[("selected", "#27406e")], foreground=[("selected", "#ffffff")])
+    st.configure("Treeview.Heading", background=SURFACE, foreground=MUTED, relief="flat", font=(FONT, 9, "bold"),
+                 bordercolor=SURFACE, lightcolor=SURFACE, darkcolor=SURFACE)
+    st.map("Treeview.Heading", background=[("active", "#1b2742")])
+    for orient in ("Vertical", "Horizontal"):
+        st.configure(f"{orient}.TScrollbar", background="#26344f", troughcolor=BG, bordercolor=BG, lightcolor="#26344f",
+                     darkcolor="#26344f", arrowcolor=MUTED, gripcount=0, relief="flat")
+        st.map(f"{orient}.TScrollbar", background=[("active", "#33446a")])

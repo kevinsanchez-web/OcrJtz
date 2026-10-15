@@ -12,6 +12,7 @@ import urllib.request
 from tkinter import ttk
 
 from panel_ui.common import AMBER, BG, FG, GREEN, MUTED, NO_WINDOW, PANEL, PORT, RED, ROOT, SLATE, URL, http_ok, load_env
+from panel_ui.common import BLUE, Btn, DANGER, SURFACE  # noqa: E402,F401
 
 EXE = ROOT / "tools" / "bin" / "cloudflared.exe"
 LOG = ROOT / "logs" / "tunnel_api.log"
@@ -116,7 +117,7 @@ class TunnelTab(tk.Frame):
     def _row(self, title: str):
         f = tk.Frame(self, bg=BG)
         f.pack(fill="x", padx=14, pady=2)
-        tk.Label(f, text=title, bg=BG, fg=MUTED, width=18, anchor="w", font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(f, text=title, bg=BG, fg=MUTED, width=18, anchor="w", font=("Segoe UI", 10)).pack(side="left")
         v = tk.Label(f, text="–", bg=BG, fg=FG, anchor="w", font=("Consolas", 10))
         v.pack(side="left", fill="x", expand=True)
         return f, v
@@ -129,25 +130,24 @@ class TunnelTab(tk.Frame):
         self.circle = self.dot.create_oval(3, 3, 17, 17, fill=SLATE, outline="")
         self.title = tk.Label(head, text="Túnel cerrado", bg=BG, fg=FG, font=("Segoe UI", 13, "bold"))
         self.title.pack(side="left", padx=8)
-        self.button = tk.Button(self, text="Abrir túnel", font=("Segoe UI", 11, "bold"), fg="white", bd=0, height=2,
-                                activeforeground="white", cursor="hand2", command=self.toggle)
-        self.button.pack(fill="x", padx=14, pady=(6, 10))
+        self.button = Btn(head, text="Abrir túnel", bg=BLUE, fg="white", padx=18, pady=7, command=self.toggle)
+        self.button.pack(side="right")
 
         f, self.v_fixed = self._row("Dirección fija")
-        self.copy_btn = tk.Button(f, text="Copiar", bg="#334155", fg="white", bd=0, cursor="hand2", command=self.copy_fixed)
+        self.copy_btn = Btn(f, text="Copiar", bg=SLATE, fg="white", bd=0, cursor="hand2", command=self.copy_fixed)
         self.copy_btn.pack(side="right")
-        self.reg_btn = tk.Button(f, text="Volver a registrar", bg="#334155", fg="white", bd=0, cursor="hand2",
+        self.reg_btn = Btn(f, text="Volver a registrar", bg=SLATE, fg="white", bd=0, cursor="hand2",
                                  command=self.reregister)
         self.reg_btn.pack(side="right", padx=6)
         _, self.v_url = self._row("Túnel temporal")
         _, self.v_chain = self._row("Estado de la cadena")
         _, self.v_limits = self._row("Límites por minuto")
 
-        self.msg = tk.Label(self, text="", bg=BG, fg=AMBER, anchor="w", justify="left", wraplength=820, font=("Segoe UI", 9))
+        self.msg = tk.Label(self, text="", bg=BG, fg=AMBER, anchor="w", justify="left", wraplength=820, font=("Segoe UI", 10))
         self.msg.pack(fill="x", padx=14, pady=(8, 2))
         tk.Label(self, text="Registro del túnel (cloudflared). Cerrar el panel NO cierra el túnel.", bg=BG, fg=MUTED,
-                 font=("Segoe UI", 9)).pack(anchor="w", padx=14, pady=(6, 0))
-        self.log = tk.Text(self, bg=PANEL, fg="#94a3b8", font=("Consolas", 8), bd=0, wrap="none", state="disabled", height=10)
+                 font=("Segoe UI", 10)).pack(anchor="w", padx=14, pady=(6, 0))
+        self.log = tk.Text(self, bg=PANEL, fg="#94a3b8", font=("Consolas", 9), bd=0, wrap="none", state="disabled", height=10)
         self.log.pack(fill="both", expand=True, padx=12, pady=(2, 12))
 
     # --- vigilancia -------------------------------------------------------------------------------
@@ -197,8 +197,8 @@ class TunnelTab(tk.Frame):
             self.title.config(text=title)
             self.v_chain.config(text=chain, fg={GREEN: GREEN, RED: RED, AMBER: AMBER}.get(color, FG))
             if not self.working:
-                label, bg = ("Cerrar túnel", "#dc2626") if s["running"] else ("Abrir túnel", "#16a34a")
-                self.button.config(text=label, bg=bg, activebackground=bg, state="normal")
+                label, bg, fg = ("Cerrar túnel", SLATE, RED) if s["running"] else ("Abrir túnel", BLUE, "white")
+                self.button.restyle(bg=bg, fg=fg, text=label, state="normal")
             text = "\n".join(s["log"])
             if text != getattr(self, "_last", None):
                 self._last = text
@@ -236,7 +236,7 @@ class TunnelTab(tk.Frame):
             self.note("Espera: hay otra acción en curso.")
             return
         self.working = True
-        self.button.config(state="disabled", text="Trabajando...", bg=SLATE)
+        self.button.restyle(bg=SLATE, fg=MUTED, text="Trabajando...", state="disabled")
         target = self._close if tunnel_pids() else self._open
         threading.Thread(target=self._guard, args=(target,), daemon=True).start()
 

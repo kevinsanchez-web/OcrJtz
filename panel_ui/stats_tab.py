@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from panel_ui.common import AMBER, BG, FG, GREEN, MUTED, PANEL, RED, ago, api_get
+from panel_ui.common import Btn, DANGER, SURFACE  # noqa: E402,F401
 
 
 def fmt_duration(s: int) -> str:
@@ -23,20 +24,20 @@ class StatsTab(tk.Frame):
         self.after(500, self._paint)
 
     def _card(self, parent, title: str):
-        f = tk.Frame(parent, bg="#1e293b")
+        f = tk.Frame(parent, bg=SURFACE)
         f.pack(side="left", expand=True, fill="x", padx=4)
-        tk.Label(f, text=title, bg="#1e293b", fg=MUTED, font=("Segoe UI", 8)).pack(anchor="w", padx=10, pady=(6, 0))
-        v = tk.Label(f, text="–", bg="#1e293b", fg=FG, font=("Segoe UI", 16, "bold"))
+        tk.Label(f, text=title, bg=SURFACE, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=10, pady=(6, 0))
+        v = tk.Label(f, text="–", bg=SURFACE, fg=FG, font=("Segoe UI", 16, "bold"))
         v.pack(anchor="w", padx=10, pady=(0, 6))
         return v
 
     def _tree(self, parent, cols, widths, height):
         style = ttk.Style(self)
         style.configure("Dark.Treeview", background=PANEL, fieldbackground=PANEL, foreground=FG, borderwidth=0, rowheight=22)
-        style.configure("Dark.Treeview.Heading", background="#1e293b", foreground=FG, relief="flat")
+        style.configure("Dark.Treeview.Heading", background=SURFACE, foreground=FG, relief="flat")
         t = ttk.Treeview(parent, columns=cols, show="headings", height=height, style="Dark.Treeview")
         for c, w in zip(cols, widths):
-            t.heading(c, text=c)
+            t.heading(c, text=c, anchor="w")
             t.column(c, width=w, anchor="w")
         t.tag_configure("bad", foreground=RED)
         t.tag_configure("ok", foreground=FG)
@@ -54,16 +55,16 @@ class StatsTab(tk.Frame):
         self.vlm = tk.Label(self, text="", bg=BG, fg=MUTED, anchor="w", font=("Segoe UI", 10))
         self.vlm.pack(fill="x", padx=12, pady=(6, 2))
 
-        tk.Label(self, text="Por app", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=12)
+        tk.Label(self, text="Por app", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", padx=12)
         self.t_clients = self._tree(self, ("App", "Peticiones", "Errores", "Tiempo medio", "Última"), (160, 90, 80, 110, 120), 4)
         self.t_clients.pack(fill="x", padx=10, pady=(0, 8))
 
         tk.Label(self, text="Últimas peticiones (solo datos de uso, nunca el contenido de los archivos)",
-                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=12)
+                 bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(anchor="w", padx=12)
         self.t_recent = self._tree(self, ("Cuándo", "App", "Servicio", "Tamaño", "Tiempo", "Estado", "Docs", "Detalle"),
                                    (80, 110, 120, 70, 70, 60, 50, 220), 10)
         self.t_recent.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        self.note = tk.Label(self, text="", bg=BG, fg=AMBER, anchor="w", font=("Segoe UI", 9))
+        self.note = tk.Label(self, text="", bg=BG, fg=AMBER, anchor="w", font=("Segoe UI", 10))
         self.note.pack(fill="x", padx=12, pady=(0, 6))
 
     def _refresh(self):

@@ -13,8 +13,9 @@ from PIL import Image, ImageDraw, ImageTk
 
 from panel_ui.common import (AMBER, BG, BLUE, FG, FILETYPES, GREEN, MUTED, PANEL, PURPLE, RED, SLATE,
                              describe, run_job, selftest_image)
+from panel_ui.common import Btn, DANGER, SURFACE  # noqa: E402,F401
 
-HELP = "Elige un archivo o pulsa Autoprueba para comprobar que la API lee bien."
+HELP = ""
 
 
 def conf_color(c: float) -> str:
@@ -52,9 +53,12 @@ def apply_rotations(img: Image.Image, rotations: list) -> Image.Image:
 
 
 class UploadTab(tk.Frame):
-    def __init__(self, notebook: ttk.Notebook, app):
+    EMPTY_LIST = "Los documentos que subas\naparecerán aquí"
+    EMPTY_VIEW = "Sube un documento o pulsa Autoprueba\npara ver qué lee la API"
+
+    def __init__(self, notebook: ttk.Notebook, app, title: str = "Probar documentos"):
         super().__init__(notebook, bg=BG)
-        notebook.add(self, text="Probar documentos")
+        notebook.add(self, text=title)
         self.app = app
         self.events = queue.Queue()
         self.results = []
@@ -62,52 +66,61 @@ class UploadTab(tk.Frame):
         self._photo = None
         self._page = 0
         self._build()
+        self.mode.trace_add("write", lambda *a: self._toggle_opts())
+        self._toggle_opts()
         self.after(250, self._poll)
 
     # --- interfaz ---------------------------------------------------------------------------------
     def _build(self):
+        self._build_top()
+        self._build_viewer()
+
+    def _build_top(self):
         bar = tk.Frame(self, bg=BG)
         bar.pack(fill="x", padx=10, pady=(10, 4))
         btn = dict(font=("Segoe UI", 10, "bold"), fg="white", bd=0, cursor="hand2", padx=14, pady=6)
-        tk.Button(bar, text="Subir imágenes o documentos…", bg=BLUE, activebackground=BLUE,
+        Btn(bar, text="Subir imágenes o documentos…", bg=BLUE, activebackground=BLUE,
                   command=self.pick_files, **btn).pack(side="left")
-        tk.Button(bar, text="Autoprueba", bg=PURPLE, activebackground=PURPLE, command=self.selftest, **btn).pack(side="left", padx=8)
-        tk.Button(bar, text="Limpiar", bg=SLATE, activebackground=SLATE, command=self.clear, **btn).pack(side="right")
+        Btn(bar, text="Autoprueba", bg=PURPLE, activebackground=PURPLE, command=self.selftest, **btn).pack(side="left", padx=8)
+        Btn(bar, text="Limpiar", bg=SLATE, activebackground=SLATE, command=self.clear, **btn).pack(side="right")
 
         modes = tk.Frame(self, bg=BG)
         modes.pack(fill="x", padx=10)
-        tk.Label(modes, text="Modalidad:", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(modes, text="Modalidad:", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         for key, label in (("transito", "Documentos de tránsito (campos de la app)"), ("general", "OCR general (cualquier documento)")):
-            tk.Radiobutton(modes, text=label, variable=self.mode, value=key, bg=BG, fg=FG, selectcolor="#1e293b",
-                           activebackground=BG, activeforeground=FG, font=("Segoe UI", 9)).pack(side="left", padx=8)
-        opts = tk.Frame(self, bg=BG)
-        opts.pack(fill="x", padx=10, pady=(2, 0))
-        tk.Label(opts, text="Campos a pedir (solo OCR general):", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
-        self.fields = tk.Entry(opts, bg=PANEL, fg=FG, insertbackground=FG, bd=0, font=("Consolas", 9), width=34)
+            tk.Radiobutton(modes, text=label, variable=self.mode, value=key, bg=BG, fg=FG, selectcolor=SURFACE,
+                           activebackground=BG, activeforeground=FG, font=("Segoe UI", 10)).pack(side="left", padx=8)
+        opts = self.opts_frame = tk.Frame(self, bg=BG)  # solo se muestra en «OCR general» (ver _toggle_opts)
+        tk.Label(opts, text="Campos a pedir (solo OCR general):", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
+        self.fields = tk.Entry(opts, bg=PANEL, fg=FG, insertbackground=FG, bd=0, font=("Consolas", 10), width=34)
         self.fields.pack(side="left", padx=6, ipady=3)
         self.deep = tk.BooleanVar(value=False)
         tk.Checkbutton(opts, text="buscar con el modelo de visión (lento)", variable=self.deep, bg=BG, fg=MUTED,
-                       selectcolor="#1e293b", activebackground=BG, activeforeground=FG, font=("Segoe UI", 8)).pack(side="left")
-        tk.Label(opts, text="ej.: total, fecha, correo", bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(side="right")
+                       selectcolor=SURFACE, activebackground=BG, activeforeground=FG, font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(opts, text="ej.: total, fecha, correo", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="right")
 
+    def _build_viewer(self):
         self.msg = tk.Label(self, text=HELP, bg=BG, fg=MUTED, anchor="w", justify="left", font=("Segoe UI", 10), wraplength=780)
         self.msg.pack(fill="x", padx=12, pady=6)
 
         body = tk.PanedWindow(self, orient="horizontal", bg=BG, bd=0, sashwidth=4)
         body.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self.files = tk.Listbox(body, bg=PANEL, fg=FG, bd=0, highlightthickness=0, activestyle="none",
-                                selectbackground="#334155", font=("Segoe UI", 9), width=28, exportselection=False)
+                                selectbackground=SLATE, font=("Segoe UI", 10), width=28, exportselection=False)
         self.files.bind("<<ListboxSelect>>", lambda e: self.show_selected())
         body.add(self.files, minsize=150)
         self.view = ttk.Notebook(body)
         body.add(self.view, minsize=320)
 
+        self.empty_list = tk.Label(self.files, text=self.EMPTY_LIST, bg=PANEL, fg=MUTED, font=("Segoe UI", 10), justify="center")
+        self.empty_view = tk.Label(self.view, text=self.EMPTY_VIEW, bg=BG, fg=MUTED, font=("Segoe UI", 11), justify="center")
+
         self.out = {}
         for key, title in (("summary", "Resumen"), ("text", "Texto / campos"), ("json", "JSON")):
             frame = tk.Frame(self.view, bg=BG)
             self.view.add(frame, text=title)
-            w = tk.Text(frame, bg=PANEL, fg="#cbd5e1", font=("Consolas", 9), bd=0, wrap="word", state="disabled")
-            sb = tk.Scrollbar(frame, command=w.yview)
+            w = tk.Text(frame, bg=PANEL, fg="#cbd5e1", font=("Consolas", 10), bd=0, wrap="word", state="disabled")
+            sb = ttk.Scrollbar(frame, command=w.yview)
             w.configure(yscrollcommand=sb.set)
             sb.pack(side="right", fill="y")
             w.pack(side="left", fill="both", expand=True)
@@ -119,23 +132,43 @@ class UploadTab(tk.Frame):
         nav = tk.Frame(vframe, bg=BG)
         nav.pack(fill="x", pady=4)
         for txt, d in (("◀", -1), ("▶", 1)):
-            tk.Button(nav, text=txt, bg=SLATE, fg="white", bd=0, width=3, command=lambda d=d: self.turn(d)).pack(side="left", padx=2)
-        self.page_label = tk.Label(nav, text="", bg=BG, fg=FG, font=("Segoe UI", 9))
+            Btn(nav, text=txt, bg=SLATE, fg="white", bd=0, width=3, command=lambda d=d: self.turn(d)).pack(side="left", padx=2)
+        self.page_label = tk.Label(nav, text="", bg=BG, fg=FG, font=("Segoe UI", 10))
         self.page_label.pack(side="left", padx=8)
         for color, txt in (("#22c55e", "segura"), ("#f59e0b", "dudosa"), ("#ef4444", "poco fiable")):
-            tk.Label(nav, text="■ " + txt, bg=BG, fg=color, font=("Segoe UI", 8)).pack(side="right", padx=4)
+            tk.Label(nav, text="■ " + txt, bg=BG, fg=color, font=("Segoe UI", 9)).pack(side="right", padx=4)
         self.canvas = tk.Canvas(vframe, bg=PANEL, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda e: self.after(120, self.draw_page))
         self.canvas.bind("<Button-1>", self.click_canvas)
-        self.hint = tk.Label(vframe, text="", bg=BG, fg=FG, anchor="w", justify="left", font=("Consolas", 9), wraplength=600)
+        self.hint = tk.Label(vframe, text="", bg=BG, fg=FG, anchor="w", justify="left", font=("Consolas", 10), wraplength=600)
         self.hint.pack(fill="x", pady=(2, 0))
 
         exp = tk.Frame(self, bg=BG)
         exp.pack(fill="x", padx=10, pady=(0, 8))
-        tk.Label(exp, text="Guardar resultado:", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(exp, text="Guardar resultado:", bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
         for txt, fn in (("JSON", self.export_json), ("Texto", self.export_text), ("CSV (Excel)", self.export_csv)):
-            tk.Button(exp, text=txt, bg=SLATE, fg="white", bd=0, padx=10, pady=3, command=fn).pack(side="left", padx=4)
+            Btn(exp, text=txt, bg=SLATE, fg="white", bd=0, padx=10, pady=3, command=fn).pack(side="left", padx=4)
+
+    def _toggle_opts(self):
+        """Los campos a pedir y la búsqueda con visión solo sirven en «OCR general»: en tránsito se ocultan."""
+        f = getattr(self, "opts_frame", None)
+        if f is None:
+            return
+        if self.mode.get() == "general":
+            f.pack(fill="x", padx=10, pady=(4, 0), before=self.msg)
+        else:
+            f.pack_forget()
+
+    def _sync_empty(self):
+        """Mensajes de ayuda sobre los paneles mientras no hay nada que mostrar."""
+        empty = self.files.size() == 0
+        for w, rely in ((self.empty_list, 0.3), (self.empty_view, 0.35)):
+            if empty:
+                w.place(relx=0.5, rely=rely, anchor="center")
+                w.lift()  # por encima de las pestañas internas
+            else:
+                w.place_forget()
 
     # --- subir ------------------------------------------------------------------------------------
     def pick_files(self):
@@ -178,6 +211,7 @@ class UploadTab(tk.Frame):
         self.events.put((item, res))
 
     def _poll(self):
+        self._sync_empty()
         try:
             while True:
                 item, res = self.events.get_nowait()
@@ -248,14 +282,14 @@ class UploadTab(tk.Frame):
     def page_rotations(self, item, n: int) -> list:
         """Giros que la API aplicó a la página antes de leerla: los recuadros están en la página ya enderezada."""
         j = (item.get("res") or {}).get("json") or {}
-        for p in j.get("pages", []):
+        for p in j.get("pages") or []:
             if p["page"] == n + 1:
                 return p.get("rotations") or []
         return []
 
     def page_lines(self, item, n: int):
         j = (item.get("res") or {}).get("json") or {}
-        for p in j.get("pages", []):
+        for p in j.get("pages") or []:
             if p["page"] == n + 1 and p.get("lines"):
                 return p["lines"]
         return None

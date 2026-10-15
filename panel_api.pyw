@@ -15,14 +15,16 @@ from tkinter import ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # para importar panel_ui al abrirlo con doble clic
 
-from panel_ui.common import BG, FG, MUTED, NO_WINDOW, PANEL, PORT, ROOT, URL, http_ok, load_env  # noqa: E402
+from panel_ui.common import (BG, BLUE, FG, FONT, MUTED, NO_WINDOW, PANEL, PORT, RED, ROOT, SLATE, URL, Btn,  # noqa: E402
+                             apply_theme, http_ok, load_env)
 from panel_ui.keys_tab import KeysTab  # noqa: E402
+from panel_ui.received_tab import ReceivedTab  # noqa: E402
 from panel_ui.stats_tab import StatsTab  # noqa: E402
 from panel_ui.tunnel_tab import TunnelTab  # noqa: E402
 from panel_ui.upload_tab import UploadTab  # noqa: E402
 
 LOG = ROOT / "logs" / "api.log"
-COLORS = {"off": "#64748b", "starting": "#f59e0b", "on": "#22c55e", "stopping": "#f59e0b"}
+COLORS = {"off": "#64748b", "starting": "#fbbf24", "on": "#4ade80", "stopping": "#fbbf24"}
 TEXTS = {
     "off": "API de lectura OCR apagada",
     "starting": "Encendiendo API de lectura OCR...",
@@ -43,32 +45,32 @@ class Panel(tk.Tk):
         super().__init__()
         self.title("API de lectura OCR")
         self.configure(bg=BG)
-        self.geometry("940x800")
+        self.geometry("1000x820")
         self.minsize(760, 600)
         self.state_name = "off"
         self.busy = None  # "starting" / "stopping" mientras dura la acción
 
-        head = tk.Frame(self, bg=BG)
-        head.pack(fill="x", padx=20, pady=(18, 4))
-        self.dot = tk.Canvas(head, width=22, height=22, bg=BG, highlightthickness=0)
+        # Cabecera: estado a la izquierda y un solo botón compacto a la derecha (sin la barra gigante de antes)
+        top = tk.Frame(self, bg=BG)
+        top.pack(fill="x", padx=24, pady=(20, 6))
+        left = tk.Frame(top, bg=BG)
+        left.pack(side="left")
+        head = tk.Frame(left, bg=BG)
+        head.pack(anchor="w")
+        self.dot = tk.Canvas(head, width=14, height=14, bg=BG, highlightthickness=0)
         self.dot.pack(side="left")
-        self.circle = self.dot.create_oval(3, 3, 19, 19, fill=COLORS["off"], outline="")
-        self.status = tk.Label(head, text=TEXTS["off"], bg=BG, fg=FG, font=("Segoe UI", 14, "bold"))
-        self.status.pack(side="left", padx=10)
-        tk.Label(self, text=URL, bg=BG, fg=MUTED, font=("Consolas", 10)).pack(anchor="w", padx=22)
+        self.circle = self.dot.create_oval(2, 2, 12, 12, fill=COLORS["off"], outline="")
+        self.status = tk.Label(head, text=TEXTS["off"], bg=BG, fg=FG, font=(FONT, 14, "bold"))
+        self.status.pack(side="left", padx=(8, 0))
+        tk.Label(left, text=URL, bg=BG, fg=MUTED, font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
+        self.button = Btn(top, text="Encender", bg=BLUE, fg="white", font=(FONT, 10, "bold"), padx=22, pady=8, command=self.toggle)
+        self.button.pack(side="right")
 
-        self.button = tk.Button(self, text="Encender", font=("Segoe UI", 12, "bold"), fg="white", bd=0,
-                                activeforeground="white", cursor="hand2", command=self.toggle, height=2)
-        self.button.pack(fill="x", padx=20, pady=14)
-
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background="#1e293b", foreground=FG, padding=(14, 6), borderwidth=0)
-        style.map("TNotebook.Tab", background=[("selected", "#334155")])
+        apply_theme(self)
         tabs = ttk.Notebook(self)
-        tabs.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        tabs.pack(fill="both", expand=True, padx=24, pady=(8, 20))
         self.upload = UploadTab(tabs, self)
+        self.received = ReceivedTab(tabs, self)
         self.stats = StatsTab(tabs, self)
         self.keys = KeysTab(tabs, self)
         self.tunnel = TunnelTab(tabs, self)
@@ -76,7 +78,7 @@ class Panel(tk.Tk):
         logbox = tk.Frame(tabs, bg=BG)
         tabs.add(logbox, text="Registro")
         self.log = tk.Text(logbox, bg=PANEL, fg="#94a3b8", font=("Consolas", 9), bd=0, wrap="none", state="disabled", height=8)
-        sb = tk.Scrollbar(logbox, command=self.log.yview)
+        sb = ttk.Scrollbar(logbox, command=self.log.yview)
         self.log.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.log.pack(side="left", fill="both", expand=True)
@@ -108,10 +110,9 @@ class Panel(tk.Tk):
         self.state_name = st
         self.dot.itemconfig(self.circle, fill=COLORS[st])
         self.status.config(text=TEXTS[st])
-        label, color = {"off": ("Encender", "#16a34a"), "on": ("Apagar", "#dc2626"),
-                        "starting": ("Encendiendo...", "#475569"), "stopping": ("Apagando...", "#475569")}[st]
-        self.button.config(text=label, bg=color, activebackground=color,
-                           state="normal" if st in ("on", "off") else "disabled")
+        label, bg, fg = {"off": ("Encender", BLUE, "white"), "on": ("Apagar", SLATE, RED),
+                         "starting": ("Encendiendo...", SLATE, MUTED), "stopping": ("Apagando...", SLATE, MUTED)}[st]
+        self.button.restyle(bg=bg, fg=fg, text=label, state="normal" if st in ("on", "off") else "disabled")
 
     def toggle(self):
         if self.busy:
