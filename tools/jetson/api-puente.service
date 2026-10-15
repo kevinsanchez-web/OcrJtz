@@ -1,0 +1,17 @@
+[Unit]
+Description=Puente de la API de lectura OCR (tunel de Cloudflare + direccion fija)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/api-puente.env
+ExecStart=__SCRIPT__
+Restart=always
+RestartSec=10
+RuntimeDirectory=api-puente
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
