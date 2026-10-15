@@ -39,7 +39,10 @@ try {
         if ($m) { $url = [regex]::Match($m.Line, "https://[a-z0-9-]+\.trycloudflare\.com").Value }
     }
     if (-not $url) { Write-Host "El tunel no dio una direccion (revisa tu conexion a internet)." -ForegroundColor Red; exit 1 }
+    & (Join-Path $PSScriptRoot "registrar_puente.ps1") -Accion set -Url $url
     $analyze = "$url/api/v1/analyze-document"
+    $fixed = [regex]::Match([IO.File]::ReadAllText($envf), "(?m)^TUNNEL_REGISTER_URL=(.+)$").Groups[1].Value.Trim()
+    if ($fixed) { $analyze = "$fixed/api/v1/analyze-document" }
     Set-Clipboard -Value $analyze
     Write-Host ""
     Write-Host "==============================================================" -ForegroundColor Green

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # para importar panel_
 from panel_ui.common import BG, FG, MUTED, NO_WINDOW, PANEL, PORT, ROOT, URL, http_ok, load_env  # noqa: E402
 from panel_ui.keys_tab import KeysTab  # noqa: E402
 from panel_ui.stats_tab import StatsTab  # noqa: E402
+from panel_ui.tunnel_tab import TunnelTab  # noqa: E402
 from panel_ui.upload_tab import UploadTab  # noqa: E402
 
 LOG = ROOT / "logs" / "api.log"
@@ -70,6 +71,7 @@ class Panel(tk.Tk):
         self.upload = UploadTab(tabs, self)
         self.stats = StatsTab(tabs, self)
         self.keys = KeysTab(tabs, self)
+        self.tunnel = TunnelTab(tabs, self)
 
         logbox = tk.Frame(tabs, bg=BG)
         tabs.add(logbox, text="Registro")
